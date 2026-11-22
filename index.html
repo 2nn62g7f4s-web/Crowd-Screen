@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DJ Crowd Screen — prototype v2</title>
+<title>DJ Crowd Screen — prototype v4</title>
 <style>
   :root { --acc:#ff2d75; --bg2:#8b5cf6; --bg:rgba(12,12,16,.85); --fg:#f2f2f5; --mut:#9a9aa8; }
   * { box-sizing:border-box; }
@@ -58,7 +58,7 @@
 
 <div id="start">
   <h1>DJ Crowd Screen</h1>
-  <p>Prototype v2 : caméras + effets kick et effets de fond psychédéliques.</p>
+  <p>Prototype v4 : caméras, effets kick, effets de fond et pluie d’animaux.</p>
   <button id="go">Démarrer</button>
   <p id="err"></p>
 </div>
@@ -91,10 +91,11 @@
     <span class="lbl">Vitesse fond</span><input id="bgSpeed" type="range" min="0" max="3" step="0.05" value="1"><span class="val" id="bgSpeedV"></span>
   </div>
 
-  <h3>Surcouche</h3>
-  <div class="row"><button id="bCats">🐱 Pluie de chats</button><button id="bCatsClear">Vider</button></div>
+  <h3>Pluie d'animaux (à chaque kick)</h3>
+  <div class="row"><button id="bCats">🐱 Chats</button><button id="bAlp">🦙 Alpagas</button><button id="bCatsClear">Vider</button></div>
+  <div class="row"><button id="bOver">Au-dessus des effets</button><span class="lbl">sinon, les animaux passent dans les effets</span></div>
   <div class="grid">
-    <span class="lbl">Chats par kick</span><input id="catN" type="range" min="1" max="8" step="1" value="3"><span class="val" id="catNV"></span>
+    <span class="lbl">Animaux par kick</span><input id="catN" type="range" min="1" max="8" step="1" value="3"><span class="val" id="catNV"></span>
     <span class="lbl">% en panique</span><input id="catPanic" type="range" min="0" max="100" step="5" value="50"><span class="val" id="catPanicV"></span>
     <span class="lbl">Taille</span><input id="catSize" type="range" min="0.5" max="2" step="0.05" value="1"><span class="val" id="catSizeV"></span>
   </div>
@@ -131,7 +132,7 @@
     <button id="bFull">Plein écran</button>
     <button id="bHide">Masquer</button>
   </div>
-  <div id="hint">Clavier : 0–7 effet kick · rangée du haut (A…P) effets de fond · B fond aléatoire · X aucun fond · K chats · N kick suivant · C caméra · Espace tap · M miroir · F plein écran · H panneau</div>
+  <div id="hint">Clavier : 0–7 effet kick · rangée du haut (A…I) effets de fond · B fond aléatoire · X aucun fond · K chats · L alpagas · N kick suivant · C caméra · Espace tap · M miroir · F plein écran · H panneau</div>
 </div>
 
 <script>
@@ -140,9 +141,10 @@
 const $ = id => document.getElementById(id);
 
 const KICK = ['Zoom pulse', 'RGB split', 'Glitch', 'Flash inversé', 'Pixel', 'Secousse', 'Flash blanc'];
-const BG = ['Kaléidoscope', 'Miroir symétrique', 'Ondes liquides', 'Tourbillon', 'Arc-en-ciel',
+const BG = ['Kaléidoscope', 'Miroir symétrique', null, null, 'Arc-en-ciel',
             'Posterize', 'Vision thermique', 'Contours néon', 'Solarisation', 'Traînées'];
 const TRAILS = 9;
+const BG_SLOTS = [...BG.keys()].filter(i => BG[i]);
 
 const S = {
   kfx: 0, bg: new Set([4]), kick: 0, seed: 0, lastKick: 0, kicks: 0, intervals: [],
@@ -170,7 +172,8 @@ const FS_SCENE = `precision highp float;
 varying vec2 vUv;
 uniform sampler2D uTex;
 uniform vec2 uRes, uVid;
-uniform float uTime, uKick, uSeed, uMirror, uAmt;
+uniform float uTime, uKick, uSeed, uMirror, uAmt, uCatOn;
+uniform sampler2D uCats;
 uniform int uK;
 uniform float uBg[10];
 ${COMMON}
@@ -183,7 +186,12 @@ vec2 cover(vec2 uv){
   if (uMirror > 0.5) uv.x = 1.0 - uv.x;
   return uv;
 }
-vec3 samp(vec2 uv){ return texture2D(uTex, cover(clamp(uv,0.0,1.0))).rgb; }
+vec3 samp(vec2 uv){
+  uv = clamp(uv, 0.0, 1.0);
+  vec3 v = texture2D(uTex, cover(uv)).rgb;
+  if (uCatOn > 0.5) { vec4 c = texture2D(uCats, uv); v = mix(v, c.rgb, c.a); }
+  return v;
+}
 
 vec3 thermal(float l){
   vec3 c;
@@ -210,18 +218,6 @@ void main(){
     float seg = 6.2831853/6.0;
     a = mod(a, seg); a = abs(a - seg*0.5);
     p = vec2(cos(a), sin(a))*r; p.x /= ar;
-    uv = p + 0.5;
-  }
-  if (uBg[2] > 0.5) {
-    uv += A*0.02*vec2(sin(uv.y*12.0 + t*2.0) + 0.5*sin(uv.y*31.0 - t*3.1),
-                      cos(uv.x*10.0 + t*1.7) + 0.5*cos(uv.x*27.0 + t*2.3));
-  }
-  if (uBg[3] > 0.5) {
-    vec2 p = uv-0.5; p.x *= ar;
-    float r = length(p);
-    float a = A*3.0*sin(t*0.4)*smoothstep(0.75, 0.0, r);
-    float c = cos(a), s = sin(a);
-    p = mat2(c,-s,s,c)*p; p.x /= ar;
     uv = p + 0.5;
   }
 
@@ -340,10 +336,10 @@ function makeTarget(w, h){
 }
 function freeTarget(x){ if (x){ gl.deleteTexture(x.t); gl.deleteFramebuffer(x.f); } }
 
-let P, PC, PB, vidTex, sceneT, acc = [null, null], accR = 0;
+let P, PC, PB, vidTex, catTex, sceneT, acc = [null, null], accR = 0;
 function initGL(){
   if (!gl) throw new Error('WebGL non disponible sur ce navigateur.');
-  P  = program(FS_SCENE, ['uTex','uRes','uVid','uTime','uKick','uSeed','uMirror','uAmt','uK','uBg']);
+  P  = program(FS_SCENE, ['uTex','uRes','uVid','uTime','uKick','uSeed','uMirror','uAmt','uK','uBg','uCats','uCatOn']);
   PC = program(FS_COMP,  ['uScene','uPrev','uTrail','uTime']);
   PB = program(FS_BLIT,  ['uSrc']);
   const buf = gl.createBuffer();
@@ -352,6 +348,8 @@ function initGL(){
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  catTex = newTex();
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,0]));
   vidTex = newTex();
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,255]));
 }
@@ -457,7 +455,7 @@ function kick(now){
     if (S.autoBg && n % every('bgEvery') === 0) randomBg();
   }
   if (S.autoCam && n % every('camEvery') === 0) switchCam(randomOther(S.cams.length, S.camIdx));
-  if (S.cats) spawnCats();
+  if (S.cats || S.alpacas) spawnCats();
   const d = $('dot'); d.classList.add('hit'); setTimeout(() => d.classList.remove('hit'), 70);
 }
 function bpm(){
@@ -478,7 +476,7 @@ function randomBg(){
   let pick;
   for (let tries = 0; tries < 10; tries++){
     const n = 1 + Math.floor(Math.random()*max);
-    const idx = [...BG.keys()].sort(() => Math.random() - 0.5).slice(0, n);
+    const idx = [...BG_SLOTS].sort(() => Math.random() - 0.5).slice(0, n);
     pick = new Set(idx);
     if ([...pick].sort().join() !== prev) break;
   }
@@ -510,7 +508,9 @@ function spawnCats(){
   for (let i = 0; i < n; i++){
     if (cats.length > 90) cats.shift();
     const panic = Math.random() < panicP;
-    const size = Math.min(W, H) * 0.075 * rnd(0.7, 1.3) * sz;
+    const kinds = []; if (S.cats) kinds.push('cat'); if (S.alpacas) kinds.push('alpaca');
+    const kind = kinds[Math.floor(Math.random()*kinds.length)] || 'cat';
+    const size = Math.min(W, H) * (kind === 'alpaca' ? 0.085 : 0.075) * rnd(0.7, 1.3) * sz;
     const side = Math.random();
     let x, y, vx, vy;
     if (side < 0.5){            // du haut
@@ -522,7 +522,7 @@ function spawnCats(){
     }
     cats.push({ x, y, vx, vy, size, panic, rot: rnd(-0.4, 0.4),
       vr: panic ? rnd(3, 8)*(Math.random() < 0.5 ? -1 : 1) : 0,
-      col: FUR[Math.floor(Math.random()*FUR.length)], ph: rnd(0, 100), age: 0, dpr });
+      kind, col: (kind === 'alpaca' ? ALP : FUR)[Math.floor(Math.random()*5)], ph: rnd(0, 100), age: 0, dpr });
   }
 }
 
@@ -662,6 +662,108 @@ function drawCat(c, t){
   cx.restore();
 }
 
+const ALP = [
+  { fur:'#fbf6ec', dark:'#5b4636', snout:'#fffdf8' },   // blanc
+  { fur:'#ecd3ab', dark:'#5b4636', snout:'#f8e9d2' },   // crème
+  { fur:'#bb8a5f', dark:'#3d2b21', snout:'#dcb48d' },   // fauve
+  { fur:'#9a9ca3', dark:'#3a3a40', snout:'#c6c8cd' },   // gris
+  { fur:'#5e4436', dark:'#2a1e17', snout:'#8c6c59' },   // brun foncé
+];
+
+function puffCloud(list, u, fill, o, wob){
+  for (const [x, y, r] of list){ cx.beginPath(); cx.arc(x*u, y*u, (r*(1+wob(x,y)) + 0.05)*u, 0, 7); cx.fillStyle = o; cx.fill(); }
+  for (const [x, y, r] of list){ cx.beginPath(); cx.arc(x*u, y*u, r*(1+wob(x,y))*u, 0, 7); cx.fillStyle = fill; cx.fill(); }
+}
+
+function drawAlpaca(c, t){
+  const u = c.size/2, P = c.panic, f = c.col, o = '#18181d';
+  const T = t*1000 + c.ph*1000;
+  const wob = P ? (x, y) => 0.06*Math.sin(T*0.05 + x*7 + y*5) : (x, y) => 0.02*Math.sin(T*0.004 + x*5 + y*3);
+  cx.save();
+  cx.translate(c.x, c.y); cx.rotate(c.rot);
+  if (P) cx.translate((Math.random()-0.5)*u*0.08, (Math.random()-0.5)*u*0.08);
+  cx.lineCap = 'round'; cx.lineJoin = 'round';
+
+  // Pattes
+  const legs = P
+    ? [[-0.5,1.0,2.7],[-0.2,1.1,2.1],[0.2,1.1,1.05],[0.5,1.0,0.45]]
+    : [[-0.48,1.0,1.63],[-0.17,1.08,1.59],[0.17,1.08,1.55],[0.48,1.0,1.51]];
+  legs.forEach(([lx, ly, a], i) => {
+    const ang = P ? a + Math.sin(T*0.032 + i*1.9)*0.8 : a + Math.sin(T*0.004 + i)*0.06;
+    const len = P ? u*0.85 : u*0.62;
+    const ex = u*lx + Math.cos(ang)*len, ey = u*ly + Math.sin(ang)*len;
+    cx.beginPath(); cx.moveTo(u*lx, u*ly); cx.lineTo(ex, ey);
+    cx.lineWidth = u*0.28; cx.strokeStyle = o; cx.stroke();
+    cx.lineWidth = u*0.17; cx.strokeStyle = f.fur; cx.stroke();
+    cx.beginPath(); cx.arc(ex, ey, u*0.12, 0, 7); cx.fillStyle = f.dark; cx.fill();
+  });
+
+  // Corps + cou en laine bouclée
+  puffCloud([[0,0.6,0.55],[-0.58,0.55,0.36],[0.58,0.55,0.36],[-0.38,0.2,0.36],[0.38,0.2,0.36],
+             [-0.38,0.92,0.34],[0.38,0.92,0.34],[0,1.0,0.34],[0,-0.1,0.3],[0,-0.38,0.27]], u, f.fur, o, wob);
+
+  // Tête agrandie (plus mignon)
+  cx.translate(0, -u*0.6); cx.scale(1.3, 1.3); cx.translate(0, u*0.6);
+  // Oreilles
+  for (const s of [-1, 1]){
+    const flap = P ? Math.sin(T*0.05 + s)*0.35 : Math.sin(T*0.003 + s)*0.05;
+    cx.save(); cx.translate(s*u*0.32, -u*1.12); cx.rotate(s*(0.5 + flap));
+    cx.beginPath(); cx.ellipse(0, 0, u*0.1, u*0.26, 0, 0, 7);
+    cx.fillStyle = f.fur; cx.fill(); cx.lineWidth = u*0.08; cx.strokeStyle = o; cx.stroke();
+    cx.beginPath(); cx.ellipse(0, u*0.03, u*0.045, u*0.16, 0, 0, 7); cx.fillStyle = '#f7a8b8'; cx.fill();
+    cx.restore();
+  }
+
+  // Tête
+  cx.beginPath(); cx.ellipse(0, -u*0.78, u*0.4, u*0.37, 0, 0, 7);
+  cx.fillStyle = f.fur; cx.fill(); cx.lineWidth = u*0.08; cx.strokeStyle = o; cx.stroke();
+  // Toupet
+  puffCloud([[-0.19,-1.08,0.15],[0,-1.15,0.17],[0.19,-1.08,0.15]], u, f.fur, o, wob);
+  cx.beginPath(); cx.ellipse(0, -u*1.0, u*0.27, u*0.09, 0, 0, 7); cx.fillStyle = f.fur; cx.fill();
+
+  // Museau
+  cx.beginPath(); cx.ellipse(0, -u*0.6, u*0.24, u*0.17, 0, 0, 7);
+  cx.fillStyle = f.snout; cx.fill(); cx.lineWidth = u*0.05; cx.strokeStyle = o; cx.stroke();
+  cx.fillStyle = o;
+  for (const s of [-1, 1]){ cx.beginPath(); cx.ellipse(s*u*0.07, -u*0.65, u*0.03, u*0.022, 0, 0, 7); cx.fill(); }
+
+  // Joues
+  cx.fillStyle = 'rgba(255,120,150,0.45)';
+  for (const s of [-1, 1]){ cx.beginPath(); cx.ellipse(s*u*0.3, -u*0.66, u*0.08, u*0.055, 0, 0, 7); cx.fill(); }
+
+  const eyeCol = f.fur === '#5e4436' ? '#f2f2f5' : o;
+  if (P){
+    for (const s of [-1, 1]){
+      cx.beginPath(); cx.arc(s*u*0.19, -u*0.86, u*0.13, 0, 7);
+      cx.fillStyle = '#fff'; cx.fill(); cx.lineWidth = u*0.05; cx.strokeStyle = o; cx.stroke();
+      cx.beginPath();
+      cx.arc(s*u*0.19 + (Math.random()-0.5)*u*0.06, -u*0.86 + (Math.random()-0.5)*u*0.06, u*0.045, 0, 7);
+      cx.fillStyle = o; cx.fill();
+    }
+    // Bouche qui crie + langue
+    cx.beginPath(); cx.ellipse(0, -u*0.5, u*0.1, u*(0.09 + 0.04*Math.sin(T*0.04)), 0, 0, 7);
+    cx.fillStyle = '#5a1020'; cx.fill(); cx.lineWidth = u*0.04; cx.strokeStyle = o; cx.stroke();
+    cx.beginPath(); cx.ellipse(0, -u*0.45, u*0.05, u*0.035, 0, 0, 7); cx.fillStyle = '#f37a98'; cx.fill();
+    // Sueur + « ! »
+    cx.beginPath();
+    cx.moveTo(u*0.5, -u*1.05); cx.quadraticCurveTo(u*0.66, -u*0.82, u*0.55, -u*0.75);
+    cx.quadraticCurveTo(u*0.42, -u*0.82, u*0.5, -u*1.05);
+    cx.fillStyle = '#7fd3ff'; cx.fill();
+    if (Math.sin(T*0.02) > 0){
+      cx.fillStyle = '#ffe14d'; cx.font = `900 ${u*0.75}px sans-serif`; cx.textAlign = 'center';
+      cx.fillText('!', -u*0.7, -u*1.15);
+    }
+  } else {
+    cx.lineWidth = u*0.065; cx.strokeStyle = eyeCol;
+    for (const s of [-1, 1]){
+      cx.beginPath(); cx.arc(s*u*0.19, -u*0.8, u*0.09, Math.PI*1.1, Math.PI*1.9); cx.stroke();
+    }
+    cx.lineWidth = u*0.045; cx.strokeStyle = o;
+    cx.beginPath(); cx.arc(0, -u*0.57, u*0.08, Math.PI*0.2, Math.PI*0.8); cx.stroke();
+  }
+  cx.restore();
+}
+
 function renderCats(dt, now){
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.round(innerWidth*dpr), h = Math.round(innerHeight*dpr);
@@ -669,7 +771,7 @@ function renderCats(dt, now){
   cx.clearRect(0, 0, w, h);
   if (!cats.length) return;
   updateCats(dt/1000);
-  for (const c of cats) drawCat(c, now/1000);
+  for (const c of cats) (c.kind === 'alpaca' ? drawAlpaca : drawCat)(c, now/1000);
 }
 
 /* ================= Boucle ================= */
@@ -691,6 +793,15 @@ function frame(now){
     vw = v.videoWidth; vh = v.videoHeight;
   }
 
+  // Animaux : dessinés sur un calque 2D puis injectés dans le rendu (ils subissent les effets)
+  renderCats(dt, now);
+  const catsIn = !S.catsOver && cats.length > 0;
+  c2.style.display = S.catsOver ? 'block' : 'none';
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D, catTex);
+  if (catsIn){ try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c2); } catch(e){} }
+  gl.activeTexture(gl.TEXTURE0);
+
   for (let i = 0; i < 10; i++) bgArr[i] = S.bg.has(i) ? 1 : 0;
   const bgAmt = +$('bgAmt').value;
   gl.useProgram(P.p);
@@ -704,6 +815,8 @@ function frame(now){
   gl.uniform1f(P.u.uAmt, bgAmt);
   gl.uniform1i(P.u.uK, S.kfx);
   gl.uniform1fv(P.u.uBg, bgArr);
+  gl.uniform1i(P.u.uCats, 2);
+  gl.uniform1f(P.u.uCatOn, catsIn ? 1 : 0);
 
   if (!S.bg.has(TRAILS)){
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -734,8 +847,6 @@ function frame(now){
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     accR = w;
   }
-
-  renderCats(dt, now);
 
   if (++uiTick % 4 === 0 && !$('ui').hidden){
     const sens = +$('sens').value, max = 3.5;
@@ -780,12 +891,12 @@ function toggleBtn(id, key){
   $(id).onclick = () => { S[key] = !S[key]; $(id).classList.toggle('on', S[key]); };
 }
 
-const TOP_ROW = ['KeyQ','KeyW','KeyE','KeyR','KeyT','KeyY','KeyU','KeyI','KeyO','KeyP'];
+const TOP_ROW = ['KeyQ','KeyW','KeyE','KeyR','KeyT','KeyY','KeyU','KeyI'];
 
 function setupUi(){
   $('kickChips').append(chip('Aucun', 'kfx', -1, () => setKick(-1)));
   KICK.forEach((n,i) => $('kickChips').append(chip(`${i+1}. ${n}`, 'kfx', i, () => setKick(i))));
-  BG.forEach((n,i) => $('bgChips').append(chip(n, 'bgfx', i, () => toggleBg(i))));
+  BG_SLOTS.forEach(i => $('bgChips').append(chip(BG[i], 'bgfx', i, () => toggleBg(i))));
   refreshKick(); refreshBg();
 
   bindSlider('freq', v => v + ' Hz', v => { if (lp) lp.frequency.setTargetAtTime(v, actx.currentTime, 0.02); });
@@ -804,6 +915,8 @@ function setupUi(){
   toggleBtn('bAutoCam', 'autoCam');
   toggleBtn('bMirror', 'mirror');
   toggleBtn('bCats', 'cats');
+  toggleBtn('bAlp', 'alpacas');
+  toggleBtn('bOver', 'catsOver');
   $('bCatsClear').onclick = () => { cats.length = 0; };
   bindSlider('catN', v => v);
   bindSlider('catPanic', v => v + ' %');
@@ -820,7 +933,7 @@ function setupUi(){
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
     const row = TOP_ROW.indexOf(e.code);
-    if (row >= 0){ toggleBg(row); return; }
+    if (row >= 0){ if (row < BG_SLOTS.length) toggleBg(BG_SLOTS[row]); return; }
     const m = /^Digit(\d)$/.exec(e.code);
     if (m){ const d = +m[1]; if (d === 0) setKick(-1); else if (d <= KICK.length) setKick(d-1); return; }
     const k = e.key.toLowerCase();
@@ -831,6 +944,7 @@ function setupUi(){
     else if (k === 'x'){ S.bg.clear(); refreshBg(); }
     else if (k === 'm') $('bMirror').click();
     else if (k === 'k') $('bCats').click();
+    else if (k === 'l') $('bAlp').click();
     else if (k === 'f') fullscreen();
     else if (k === 'h') toggleUi();
   });
