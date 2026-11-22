@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DJ Crowd Screen — prototype v6.1</title>
+<title>DJ Crowd Screen — prototype v7</title>
 <style>
   :root { --acc:#ff2d75; --bg2:#8b5cf6; --edge:#22c3e6; --panel:#0e0e13; --line:#23232c;
           --fg:#f2f2f5; --mut:#9a9aa8; --field:#1a1a21; }
@@ -161,6 +161,16 @@
           <span class="lbl">Vitesse</span><input id="bgSpeed" type="range" min="0" max="3" step="0.05" value="1"><span class="val" id="bgSpeedV"></span>
         </div>
       </div>
+      <div class="card">
+        <h3>Échos de mouvement</h3>
+        <p class="help">Seuls les éléments qui bougent dans l'image laissent une traînée ; le décor immobile reste net.</p>
+        <div class="grid">
+          <span class="lbl">Longueur</span><input id="echoLen" type="range" min="0.5" max="0.97" step="0.01" value="0.92"><span class="val" id="echoLenV"></span>
+          <span class="lbl">Seuil de mouvement</span><input id="echoThr" type="range" min="0.04" max="0.5" step="0.01" value="0.14"><span class="val" id="echoThrV"></span>
+        </div>
+        <div class="row"><button id="bEchoRainbow" class="on">Échos arc-en-ciel</button></div>
+        <p class="help">Monte le seuil si le bruit de la caméra (salle sombre) crée des échos parasites.</p>
+      </div>
     </section>
 
     <!-- BORDS -->
@@ -261,13 +271,13 @@
       </div>
     </section>
 
-    <div id="foot">Clavier : Espace tap · 0–7 kick · A…I fond · V bords · B fond aléatoire · X aucun fond · C source · K chats · L alpagas · M miroir · H projection · F plein écran</div>
+    <div id="foot">Clavier : Espace tap · 0–4 kick · A…I fond · V bords · B fond aléatoire · X aucun fond · C source · K chats · L alpagas · M miroir · H projection · F plein écran</div>
   </aside>
 </div>
 
 <div id="start">
   <h1>DJ Crowd Screen</h1>
-  <p>Prototype v6 : écran partagé, réglages en onglets et effets de bords.</p>
+  <p>Prototype v7 : écran partagé, effets de bords et échos de mouvement.</p>
   <button id="go">Démarrer</button>
   <p id="err"></p>
 </div>
@@ -277,10 +287,10 @@
 'use strict';
 const $ = id => document.getElementById(id);
 
-const KICK = ['Zoom pulse', 'RGB split', 'Glitch', 'Flash inversé', 'Pixel', 'Secousse', 'Flash blanc'];
-const BG = ['Kaléidoscope', 'Miroir symétrique', null, null, 'Arc-en-ciel',
+const KICK = ['Zoom pulse', 'RGB split', 'Glitch', 'Flash inversé'];
+const BG = ['Kaléidoscope', 'Miroir symétrique', 'Échos de mouvement', null, 'Arc-en-ciel',
             'Posterize', 'Vision thermique', 'Contours néon', 'Solarisation', 'Traînées'];
-const TRAILS = 9;
+const TRAILS = 9, ECHO = 2;
 const BG_SLOTS = [...BG.keys()].filter(i => BG[i]);
 
 const S = {
@@ -288,6 +298,7 @@ const S = {
   mirror: false, autoKick: true, autoBg: true, autoCam: true, sync: false,
   sources: [], srcIdx: -1, video: null, switchToken: 0, prevEl: null,
   curDims: [16, 9], prevDims: [16, 9], curMir: false, prevMir: false,
+  echoRainbow: true, clearMot: true, motR: 0,
   edge: -1, edgeT: 0, edgePulse: true, autoEdge: false,
   tr: 0, trStart: 0, trDur: 0, trChoice: -1, useCams: true, useVids: true, bgTime: 0, clearAcc: true,
 };
@@ -314,8 +325,8 @@ uniform sampler2D uTex, uPrev;
 uniform vec2 uRes, uVid, uVidP;
 uniform float uTime, uKick, uSeed, uMirror, uMirP, uAmt, uCatOn, uMix, uClock;
 uniform int uTr;
-uniform sampler2D uEdgeTex;
-uniform float uEdgeOn;
+uniform sampler2D uEdgeTex, uEcho;
+uniform float uEdgeOn, uEchoOn, uEchoTint;
 uniform sampler2D uCats;
 uniform int uK;
 uniform float uBg[10];
@@ -364,6 +375,12 @@ vec3 source(vec2 uv){
 vec3 samp(vec2 uv){
   uv = clamp(uv, 0.0, 1.0);
   vec3 v = source(uv);
+  if (uEchoOn > 0.5) {
+    vec4 ec = texture2D(uEcho, uv);
+    vec3 rb = 0.5 + 0.5*cos(6.2831853*(uClock*0.25 + uv.y*0.6 + vec3(0.0, 0.33, 0.67)));
+    vec3 ghost = mix(ec.rgb, max(ec.rgb, rb*1.1), uEchoTint*0.7);
+    v = max(v, ghost*ec.a*0.95);          // « éclaircir » : l'écho n'efface jamais l'objet
+  }
   if (uEdgeOn > 0.5) { vec4 e = texture2D(uEdgeTex, uv); v = mix(v, e.rgb, e.a); }
   if (uCatOn > 0.5) { vec4 c = texture2D(uCats, uv); v = mix(v, c.rgb, c.a); }
   return v;
@@ -406,13 +423,6 @@ void main(){
     float row = floor(uv.y*rows);
     gon = step(1.0-0.6*kc, hash(row+uSeed));
     uv.x += gon*(hash(row*1.7+uSeed)-0.5)*0.35*k;
-  } else if (uK == 4) {
-    float n = mix(160.0, 18.0, kc);
-    vec2 g = vec2(n*ar, n);
-    uv = (floor(uv*g)+0.5)/g;
-  } else if (uK == 5) {
-    uv += (vec2(hash(uSeed), hash(uSeed+7.0))-0.5)*0.07*k;
-    uv = (uv-0.5)*(1.0-0.06*k) + 0.5;
   }
 
   /* ---- Échantillonnage ---- */
@@ -452,8 +462,6 @@ void main(){
   if (uK == 0) col *= 1.0 + 0.35*k;
   else if (uK == 2) col = mix(col, floor(col*4.0)/4.0, gon*kc);
   else if (uK == 3) col = mix(col, vec3(1.0)-col, smoothstep(0.35, 0.65, k));
-  else if (uK == 5) col *= 1.0 + 0.2*k;
-  else if (uK == 6) col = mix(col, vec3(1.0), kc*0.85);
 
   if (uEdgeOn < 0.5) col *= mix(0.7, 1.0, smoothstep(0.95, 0.3, length(vUv-0.5)));
   gl_FragColor = vec4(clamp(col,0.0,1.0), 1.0);
@@ -560,6 +568,31 @@ vec4 edgeLayer(vec2 uv){
 
 void main(){ gl_FragColor = edgeLayer(vUv); }`;
 
+/* Échos de mouvement : mémoire de l'image qui se fond lentement dans l'image courante.
+   Là où rien ne bouge, mémoire = image (aucun effet) ; là où ça bouge, la mémoire garde
+   la trace des positions passées. rgb = mémoire, a = écart avec l'image courante. */
+const FS_MOTION = `precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex, uAccP;
+uniform vec2 uRes, uVid;
+uniform float uMirror, uThr, uDecay, uTint, uGain;
+${COMMON}
+vec2 cover(vec2 uv){
+  float sr = uRes.x/uRes.y, vr = uVid.x/max(uVid.y, 1.0);
+  vec2 s = sr > vr ? vec2(1.0, vr/sr) : vec2(sr/vr, 1.0);
+  uv = (uv - 0.5)*s + 0.5;
+  if (uMirror > 0.5) uv.x = 1.0 - uv.x;
+  return uv;
+}
+void main(){
+  vec3 cur = texture2D(uTex, cover(vUv)).rgb;
+  vec3 mem = texture2D(uAccP, vUv).rgb;
+  mem = mix(mem, hueRot(mem, 0.06), uTint);              // les échos changent de teinte en vieillissant
+  mem = mix(cur, mem, uDecay*uGain);
+  float g = smoothstep(uThr, uThr + 0.15, length(mem - cur));
+  gl_FragColor = vec4(mem, g);
+}`;
+
 const FS_BLIT = `precision mediump float;
 varying vec2 vUv; uniform sampler2D uSrc;
 void main(){ gl_FragColor = texture2D(uSrc, vUv); }`;
@@ -600,12 +633,13 @@ function makeTarget(w, h){
 }
 function freeTarget(x){ if (x){ gl.deleteTexture(x.t); gl.deleteFramebuffer(x.f); } }
 
-let P, PC, PB, PE, edgeT, vidTex, prevTex, catTex, sceneT, acc = [null, null], accR = 0;
+let P, PC, PB, PE, PM, mot = [null, null], edgeT, vidTex, prevTex, catTex, sceneT, acc = [null, null], accR = 0;
 function initGL(){
   if (!gl) throw new Error('WebGL non disponible sur ce navigateur.');
-  P  = program(FS_SCENE, ['uTex','uRes','uVid','uTime','uKick','uSeed','uMirror','uAmt','uK','uBg','uCats','uCatOn','uPrev','uVidP','uMirP','uMix','uClock','uTr','uEdgeTex','uEdgeOn']);
+  P  = program(FS_SCENE, ['uTex','uRes','uVid','uTime','uKick','uSeed','uMirror','uAmt','uK','uBg','uCats','uCatOn','uPrev','uVidP','uMirP','uMix','uClock','uTr','uEdgeTex','uEdgeOn','uEcho','uEchoOn','uEchoTint']);
   PC = program(FS_COMP,  ['uScene','uPrev','uTrail','uTime']);
   PB = program(FS_BLIT,  ['uSrc']);
+  PM = program(FS_MOTION, ['uTex','uAccP','uRes','uVid','uMirror','uThr','uDecay','uTint','uGain']);
   PE = program(FS_EDGE,  ['uRes','uEdge','uEdgeAmt','uEdgeSize','uEdgeT','uEdgePulse']);
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
@@ -627,6 +661,9 @@ function resize(){
     canvas.width = w; canvas.height = h;
     freeTarget(sceneT); freeTarget(acc[0]); freeTarget(acc[1]); freeTarget(edgeT);
     edgeT = makeTarget(Math.max(2, w >> 1), Math.max(2, h >> 1));   // calque des bords, demi-résolution
+    freeTarget(mot[0]); freeTarget(mot[1]);
+    mot = [makeTarget(Math.max(2, w >> 1), Math.max(2, h >> 1)), makeTarget(Math.max(2, w >> 1), Math.max(2, h >> 1))];
+    S.clearMot = true;
     sceneT = makeTarget(w, h); acc = [makeTarget(w, h), makeTarget(w, h)];
     S.clearAcc = true;
   }
@@ -695,6 +732,7 @@ async function switchSource(i){
     S.tr = oldEl ? pickTransition() : 0;
     S.trDur = S.tr === 0 ? 0 : +$('trDur').value;
     S.trStart = performance.now();
+    S.clearMot = true;
     $('selCam').value = String(i);
     if (oldSrc && oldSrc.type === 'video' && oldEl !== el)
       setTimeout(() => { if (S.video !== oldEl) oldEl.pause(); }, S.trDur + 300);
@@ -818,7 +856,7 @@ function bpm(){
 /* ================= Effets ================= */
 function setKick(i){ S.kfx = i; refreshKick(); }
 function toggleBg(i){
-  if (S.bg.has(i)) S.bg.delete(i); else { S.bg.add(i); if (i === TRAILS) S.clearAcc = true; }
+  if (S.bg.has(i)) S.bg.delete(i); else { S.bg.add(i); if (i === TRAILS) S.clearAcc = true; if (i === ECHO) S.clearMot = true; }
   refreshBg();
 }
 function randomBg(){
@@ -1161,6 +1199,32 @@ function frame(now){
   if (catsIn){ try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c2); } catch(e){} }
   gl.activeTexture(gl.TEXTURE0);
 
+  // Échos de mouvement (demi-résolution)
+  const echoOn = S.bg.has(ECHO);
+  if (echoOn){
+    const hw = Math.max(2, canvas.width >> 1), hh = Math.max(2, canvas.height >> 1);
+    const w2 = 1 - S.motR;
+    gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, mot[S.motR].t);
+    gl.useProgram(PM.p);
+    gl.uniform1i(PM.u.uTex, 0); gl.uniform1i(PM.u.uAccP, 6);
+    gl.uniform2f(PM.u.uRes, canvas.width, canvas.height);
+    gl.uniform2f(PM.u.uVid, vw, vh);
+    gl.uniform1f(PM.u.uMirror, S.mirror && S.curMir ? 1 : 0);
+    gl.uniform1f(PM.u.uThr, +$('echoThr').value);
+    gl.uniform1f(PM.u.uDecay, Math.pow(+$('echoLen').value, dt/16.7));
+    gl.uniform1f(PM.u.uTint, S.echoRainbow ? 1 : 0);
+    gl.uniform1f(PM.u.uGain, (inTr || S.clearMot) ? 0 : 1);   // repart de zéro au changement de source
+    S.clearMot = false;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, mot[w2].f);
+    gl.viewport(0, 0, hw, hh);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    S.motR = w2;
+  }
+  gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, mot[S.motR].t);
+  gl.activeTexture(gl.TEXTURE0);
+
   // Calque des bords (demi-résolution), mélangé ensuite à la source avant les effets
   if (S.edge >= 0){
     gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, null);   // évite une boucle de rétroaction
@@ -1198,6 +1262,9 @@ function frame(now){
   gl.uniform1f(P.u.uClock, now/1000);
   gl.uniform1i(P.u.uEdgeTex, 4);
   gl.uniform1f(P.u.uEdgeOn, S.edge >= 0 ? 1 : 0);
+  gl.uniform1i(P.u.uEcho, 6);
+  gl.uniform1f(P.u.uEchoOn, echoOn ? 1 : 0);
+  gl.uniform1f(P.u.uEchoTint, S.echoRainbow ? 1 : 0);
   gl.uniform1f(P.u.uAmt, bgAmt);
   gl.uniform1i(P.u.uK, S.kfx);
   gl.uniform1fv(P.u.uBg, bgArr);
@@ -1304,6 +1371,9 @@ function setupUi(){
   toggleBtn('bAutoBg', 'autoBg');
   toggleBtn('bAutoEdge', 'autoEdge');
   toggleBtn('bEdgePulse', 'edgePulse');
+  toggleBtn('bEchoRainbow', 'echoRainbow');
+  bindSlider('echoLen', v => (+v).toFixed(2));
+  bindSlider('echoThr', v => (+v).toFixed(2));
   $('edgeChips').append(chip('Aucun', 'edgefx', -1, () => setEdge(-1)));
   EDGE.forEach((n, i) => $('edgeChips').append(chip(n, 'edgefx', i, () => setEdge(i))));
   setEdge(-1);
