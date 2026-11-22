@@ -261,7 +261,7 @@ function randomOther(n, cur){ if (n < 2) return cur; let r; do { r = Math.floor(
 
 /* ---------- Audio / détection du kick ---------- */
 let actx, analyser, hp, lp, micSrc, micStream, abuf;
-const hist = []; let prevRms = 0, lastRatio = 0;
+const hist = []; let armed = true, lastRms = 0, lastRatio = 0;
 
 async function startMic(deviceId){
   if (micStream) micStream.getTracks().forEach(t => t.stop());
@@ -291,8 +291,10 @@ function detect(now){
   const ratio = rms / (avg + 1e-6);
   lastRatio = ratio;
   const sens = +$('sens').value;
-  if (ratio > sens && rms > 0.004 && rms > prevRms && now - S.lastKick > 140) kick(now);
-  prevRms = rms;
+  // Déclenche au franchissement du seuil, se réarme quand le niveau redescend
+  if (armed && ratio > sens && rms > 0.0002 && now - S.lastKick > 140){ kick(now); armed = false; }
+  else if (ratio < 1 + (sens - 1) * 0.5) armed = true;
+  lastRms = rms;
 }
 function kick(now){
   now = now || performance.now();
@@ -342,7 +344,7 @@ function frame(now){
     $('meterThr').style.left = (sens/max*100) + '%';
     const b = bpm();
     const cam = S.cams[S.camIdx];
-    $('status').textContent = `${b ? b + ' BPM' : '— BPM'} · ${FX[S.fx]} · ${cam ? (cam.label || 'Caméra ' + (S.camIdx+1)) : 'pas de caméra'} · ${S.kicks} kicks`;
+    $('status').textContent = `${b ? b + ' BPM' : '— BPM'} · basses ${(lastRms*1000).toFixed(1)} ·${FX[S.fx]} · ${cam ? (cam.label || 'Caméra ' + (S.camIdx+1)) : 'pas de caméra'} · ${S.kicks} kicks`;
   }
   requestAnimationFrame(frame);
 }
