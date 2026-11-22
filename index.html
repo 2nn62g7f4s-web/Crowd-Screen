@@ -3,150 +3,273 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DJ Crowd Screen — prototype v5</title>
+<title>DJ Crowd Screen — prototype v6</title>
 <style>
-  :root { --acc:#ff2d75; --bg2:#8b5cf6; --bg:rgba(12,12,16,.85); --fg:#f2f2f5; --mut:#9a9aa8; }
+  :root { --acc:#ff2d75; --bg2:#8b5cf6; --edge:#22c3e6; --panel:#0e0e13; --line:#23232c;
+          --fg:#f2f2f5; --mut:#9a9aa8; --field:#1a1a21; }
   * { box-sizing:border-box; }
   html,body { margin:0; height:100%; background:#000; color:var(--fg);
     font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
-  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+
+  /* ---- Écran partagé : image | réglages ---- */
+  #app { position:fixed; inset:0; display:flex; }
+  #stage { position:relative; flex:1 1 auto; min-width:0; min-height:0; background:#000; overflow:hidden; }
+  #stage canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
   #fx2d { pointer-events:none; z-index:1; }
+  #ui { flex:0 0 36%; min-width:320px; max-width:520px; display:flex; flex-direction:column;
+    background:var(--panel); border-left:1px solid var(--line); min-height:0; }
+  #ui[hidden] { display:none; }
+  @media (orientation:portrait){
+    #app { flex-direction:column; }
+    #ui { flex:0 0 56%; min-width:0; max-width:none; border-left:none; border-top:1px solid var(--line); }
+    #foot { display:none; }
+  }
+
+  /* ---- En-tête ---- */
+  #head { padding:10px 12px 8px; display:flex; flex-direction:column; gap:6px; border-bottom:1px solid var(--line); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  #dot { width:12px; height:12px; border-radius:50%; background:#333; transition:background .05s; flex:none; }
+  #dot.hit { background:var(--acc); box-shadow:0 0 12px var(--acc); }
+  #status { flex:1; font-variant-numeric:tabular-nums; font-size:13px; font-weight:600; }
+  #now { color:var(--mut); font-size:12px; }
+  .quick { display:flex; gap:6px; }
+  .quick button { flex:1; }
+
+  /* ---- Onglets ---- */
+  #tabs { display:flex; gap:2px; padding:6px 8px 0; overflow-x:auto; border-bottom:1px solid var(--line);
+    scrollbar-width:none; -webkit-overflow-scrolling:touch; flex:none; }
+  #tabs::-webkit-scrollbar { display:none; }
+  #tabs button { background:none; border:none; border-bottom:2px solid transparent; border-radius:0;
+    color:var(--mut); padding:8px 10px; white-space:nowrap; font-weight:600; font-size:13px; }
+  #tabs button.active { color:var(--fg); border-bottom-color:var(--acc); }
+  .pane { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:14px 12px 20px;
+    display:none; flex-direction:column; gap:12px; min-height:0; }
+  .pane.active { display:flex; }
+  .card { background:#15151c; border:1px solid var(--line); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:9px; }
+  h3 { margin:0; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--mut); font-weight:700; }
+  .help { color:var(--mut); font-size:12px; margin:-4px 0 0; }
+  #foot { padding:6px 12px 8px; color:#6d6d7a; font-size:10.5px; border-top:1px solid var(--line); flex:none; }
+
+  /* ---- Contrôles ---- */
+  button { background:#24242c; color:var(--fg); border:1px solid #3a3a46; border-radius:8px;
+    padding:7px 11px; font:inherit; cursor:pointer; }
+  button:hover { border-color:#5a5a6a; }
+  button.on { background:var(--acc); border-color:var(--acc); }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { padding:6px 10px; font-size:13px; border-radius:999px; }
+  .chip.bgfx.on { background:var(--bg2); border-color:var(--bg2); }
+  .chip.edgefx.on { background:var(--edge); border-color:var(--edge); color:#05141a; }
+  .lbl { color:var(--mut); font-size:12px; }
+  #meter { position:relative; height:12px; background:var(--field); border-radius:6px; overflow:hidden; flex:1; }
+  #meterFill { position:absolute; left:0; top:0; bottom:0; width:0; background:#5ad1a0; }
+  #meterThr { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--acc); }
+  input[type=range] { flex:1; accent-color:var(--acc); min-width:0; }
+  input[type=number] { width:56px; background:var(--field); color:var(--fg); border:1px solid #3a3a46; border-radius:6px; padding:5px; font:inherit; }
+  select { flex:1; min-width:0; background:var(--field); color:var(--fg); border:1px solid #3a3a46; border-radius:6px; padding:7px; font:inherit; }
+  .grid { display:grid; grid-template-columns:auto 1fr auto; gap:8px 10px; align-items:center; }
+  .val { min-width:50px; text-align:right; font-variant-numeric:tabular-nums; color:var(--mut); font-size:12px; }
+  .seg { display:inline-flex; border:1px solid #3a3a46; border-radius:8px; overflow:hidden; }
+  .seg button { border:none; border-radius:0; }
+  [data-mode][hidden] { display:none; }
+
+  /* ---- Divers ---- */
+  #showUi { position:absolute; right:10px; bottom:10px; z-index:4; opacity:.3; }
+  #showUi:hover { opacity:1; }
   #start { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
     justify-content:center; gap:14px; text-align:center; padding:24px; background:#08080b; z-index:10; }
   #start h1 { margin:0; font-size:28px; letter-spacing:.04em; }
   #start p { margin:0; color:var(--mut); max-width:420px; }
   #err { color:#ff6b6b !important; }
-  button { background:#24242c; color:var(--fg); border:1px solid #3a3a46; border-radius:8px;
-    padding:7px 11px; font:inherit; cursor:pointer; }
-  button:hover { border-color:#5a5a6a; }
-  button.on { background:var(--acc); border-color:var(--acc); }
-  .chip { padding:5px 9px; font-size:13px; border-radius:999px; }
-  .chip.bgfx.on { background:var(--bg2); border-color:var(--bg2); }
   #go { background:var(--acc); border:none; font-size:17px; padding:12px 28px; }
-  #ui { position:fixed; left:12px; bottom:12px; width:min(480px, calc(100% - 24px));
-    max-height:calc(100% - 24px); overflow-y:auto; -webkit-overflow-scrolling:touch;
-    background:var(--bg); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
-    border:1px solid #2c2c36; border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:9px; z-index:5; }
-  #ui[hidden] { display:none; }
-  h3 { margin:6px 0 0; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--mut); font-weight:600; }
-  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  .chips { display:flex; gap:6px; flex-wrap:wrap; }
-  .lbl { color:var(--mut); font-size:12px; }
-  #dot { width:14px; height:14px; border-radius:50%; background:#333; transition:background .05s; flex:none; }
-  #dot.hit { background:var(--acc); box-shadow:0 0 12px var(--acc); }
-  #status, #now { flex:1; font-variant-numeric:tabular-nums; font-size:13px; }
-  #now { color:var(--mut); }
-  #meter { position:relative; height:10px; background:#1a1a20; border-radius:5px; overflow:hidden; flex:1; }
-  #meterFill { position:absolute; left:0; top:0; bottom:0; width:0; background:#5ad1a0; }
-  #meterThr { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--acc); }
-  input[type=range] { flex:1; accent-color:var(--acc); min-width:0; }
-  input[type=number] { width:54px; background:#1a1a20; color:var(--fg); border:1px solid #3a3a46; border-radius:6px; padding:4px; font:inherit; }
-  select { flex:1; min-width:0; background:#1a1a20; color:var(--fg); border:1px solid #3a3a46; border-radius:6px; padding:6px; font:inherit; }
-  .grid { display:grid; grid-template-columns:auto 1fr auto; gap:6px 10px; align-items:center; }
-  .val { min-width:50px; text-align:right; font-variant-numeric:tabular-nums; color:var(--mut); font-size:12px; }
-  .seg { display:inline-flex; border:1px solid #3a3a46; border-radius:8px; overflow:hidden; }
-  .seg button { border:none; border-radius:0; }
-  #hint { color:var(--mut); font-size:11px; }
-  #showUi { position:fixed; right:10px; bottom:10px; z-index:4; opacity:.25; }
-  #showUi:hover { opacity:1; }
-  [data-mode][hidden] { display:none; }
 </style>
 </head>
 <body>
-<canvas id="gl"></canvas>
-<canvas id="fx2d"></canvas>
+<div id="app">
+  <div id="stage">
+    <canvas id="gl"></canvas>
+    <canvas id="fx2d"></canvas>
+    <button id="showUi" hidden>⚙︎ Réglages</button>
+  </div>
+
+  <aside id="ui" hidden>
+    <div id="head">
+      <div class="row"><div id="dot"></div><div id="status">—</div></div>
+      <div id="now">—</div>
+      <div class="quick">
+        <button id="bTap">Tap kick</button>
+        <button id="bHide">Projection</button>
+        <button id="bFull">Plein écran</button>
+      </div>
+    </div>
+
+    <nav id="tabs">
+      <button data-tab="audio">Audio</button>
+      <button data-tab="kick">Kick</button>
+      <button data-tab="fond">Fond</button>
+      <button data-tab="bords">Bords</button>
+      <button data-tab="animaux">Animaux</button>
+      <button data-tab="sources">Sources</button>
+      <button data-tab="auto">Auto</button>
+    </nav>
+
+    <!-- AUDIO -->
+    <section class="pane" data-pane="audio">
+      <div class="card">
+        <h3>Détection du kick</h3>
+        <div class="row"><span class="lbl">Niveau</span><div id="meter"><div id="meterFill"></div><div id="meterThr"></div></div></div>
+        <p class="help">Un kick est détecté quand la jauge dépasse le trait rose.</p>
+        <div class="grid">
+          <span class="lbl">Sensibilité</span><input id="sens" type="range" min="1.1" max="3" step="0.05" value="1.5"><span class="val" id="sensV"></span>
+          <span class="lbl">Fréquence d'écoute</span><input id="freq" type="range" min="60" max="400" step="10" value="140"><span class="val" id="freqV"></span>
+        </div>
+        <p class="help">Monte la fréquence (200–300 Hz) si le son sort d'un petit haut-parleur.</p>
+      </div>
+      <div class="card">
+        <h3>Entrée audio</h3>
+        <div class="row"><span class="lbl">Micro</span><select id="selMic"></select></div>
+      </div>
+    </section>
+
+    <!-- KICK -->
+    <section class="pane" data-pane="kick">
+      <div class="card">
+        <h3>Effet sur le kick</h3>
+        <p class="help">Un seul effet à la fois, déclenché à chaque kick.</p>
+        <div class="chips" id="kickChips"></div>
+      </div>
+      <div class="card">
+        <h3>Réglages</h3>
+        <div class="grid">
+          <span class="lbl">Intensité</span><input id="amt" type="range" min="0.2" max="1.5" step="0.05" value="1"><span class="val" id="amtV"></span>
+          <span class="lbl">Durée (ms)</span><input id="dur" type="range" min="80" max="700" step="10" value="260"><span class="val" id="durV"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOND -->
+    <section class="pane" data-pane="fond">
+      <div class="card">
+        <h3>Effets de fond</h3>
+        <p class="help">En continu. Active-en plusieurs pour les combiner.</p>
+        <div class="chips" id="bgChips"></div>
+        <div class="row"><button id="bBgRand">Combinaison aléatoire</button><button id="bBgClear">Aucun</button></div>
+      </div>
+      <div class="card">
+        <h3>Réglages</h3>
+        <div class="grid">
+          <span class="lbl">Intensité</span><input id="bgAmt" type="range" min="0.2" max="1.5" step="0.05" value="1"><span class="val" id="bgAmtV"></span>
+          <span class="lbl">Vitesse</span><input id="bgSpeed" type="range" min="0" max="3" step="0.05" value="1"><span class="val" id="bgSpeedV"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- BORDS -->
+    <section class="pane" data-pane="bords">
+      <div class="card">
+        <h3>Effet sur les bords du cadre</h3>
+        <p class="help">Un contour animé qui ondule autour de l'image.</p>
+        <div class="chips" id="edgeChips"></div>
+      </div>
+      <div class="card">
+        <h3>Réglages</h3>
+        <div class="grid">
+          <span class="lbl">Intensité</span><input id="edgeAmt" type="range" min="0.2" max="1" step="0.05" value="0.85"><span class="val" id="edgeAmtV"></span>
+          <span class="lbl">Épaisseur</span><input id="edgeSize" type="range" min="0.05" max="0.35" step="0.01" value="0.15"><span class="val" id="edgeSizeV"></span>
+          <span class="lbl">Vitesse</span><input id="edgeSpeed" type="range" min="0" max="3" step="0.05" value="1"><span class="val" id="edgeSpeedV"></span>
+        </div>
+        <div class="row"><button id="bEdgePulse" class="on">Pulse sur le kick</button></div>
+      </div>
+    </section>
+
+    <!-- ANIMAUX -->
+    <section class="pane" data-pane="animaux">
+      <div class="card">
+        <h3>Pluie d'animaux</h3>
+        <p class="help">Des animaux tombent à chaque kick.</p>
+        <div class="row"><button id="bCats">🐱 Chats</button><button id="bAlp">🦙 Alpagas</button><button id="bCatsClear">Vider l'écran</button></div>
+      </div>
+      <div class="card">
+        <h3>Réglages</h3>
+        <div class="grid">
+          <span class="lbl">Par kick</span><input id="catN" type="range" min="1" max="8" step="1" value="3"><span class="val" id="catNV"></span>
+          <span class="lbl">% en panique</span><input id="catPanic" type="range" min="0" max="100" step="5" value="50"><span class="val" id="catPanicV"></span>
+          <span class="lbl">Taille</span><input id="catSize" type="range" min="0.5" max="2" step="0.05" value="1"><span class="val" id="catSizeV"></span>
+        </div>
+        <div class="row"><button id="bOver">Au-dessus des effets</button></div>
+        <p class="help">Désactivé : les animaux passent dans les effets (couleurs, kaléidoscope, traînées…).</p>
+      </div>
+    </section>
+
+    <!-- SOURCES -->
+    <section class="pane" data-pane="sources">
+      <div class="card">
+        <h3>Source affichée</h3>
+        <div class="row"><select id="selCam"></select><button id="bCam">Suivante ▶</button></div>
+        <div class="row"><button id="bMirror">Miroir caméra</button></div>
+      </div>
+      <div class="card">
+        <h3>Banque de vidéos</h3>
+        <p class="help">Les vidéos tournent en boucle, comme une caméra.</p>
+        <div class="row">
+          <button id="bAddVid">＋ Ajouter des vidéos</button>
+          <input id="fileVid" type="file" accept="video/*" multiple hidden>
+        </div>
+        <div class="chips" id="vidList"></div>
+      </div>
+      <div class="card">
+        <h3>Transition au changement</h3>
+        <div class="chips" id="trChips"></div>
+        <div class="grid">
+          <span class="lbl">Durée (ms)</span><input id="trDur" type="range" min="100" max="2500" step="50" value="800"><span class="val" id="trDurV"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- AUTO -->
+    <section class="pane" data-pane="auto">
+      <div class="card">
+        <h3>Mode de rotation</h3>
+        <span class="seg"><button id="mSync">Synchronisées</button><button id="mIndep" class="on">Indépendantes</button></span>
+        <p class="help" data-mode="indep">Chaque rotation a son propre rythme.</p>
+        <div class="row" data-mode="sync" hidden>
+          <span class="lbl">Tout changer ensemble tous les</span><input id="syncEvery" type="number" min="1" value="16"><span class="lbl">kicks</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Effets</h3>
+        <div class="row">
+          <button id="bAutoKick" class="on">Auto kick</button>
+          <span data-mode="indep" class="row"><span class="lbl">tous les</span><input id="kickEvery" type="number" min="1" value="16"><span class="lbl">kicks</span></span>
+        </div>
+        <div class="row">
+          <button id="bAutoBg" class="on">Auto fond</button>
+          <span data-mode="indep" class="row"><span class="lbl">tous les</span><input id="bgEvery" type="number" min="1" value="32"><span class="lbl">kicks</span></span>
+          <span class="lbl">max</span><input id="bgMax" type="number" min="1" max="4" value="2"><span class="lbl">combinés</span>
+        </div>
+        <div class="row">
+          <button id="bAutoEdge">Auto bords</button>
+          <span data-mode="indep" class="row"><span class="lbl">tous les</span><input id="edgeEvery" type="number" min="1" value="32"><span class="lbl">kicks</span></span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Sources</h3>
+        <div class="row">
+          <button id="bAutoCam" class="on">Auto source</button>
+          <span class="lbl">tous les</span><input id="camEvery" type="number" min="1" value="32"><span class="lbl">kicks</span>
+        </div>
+        <div class="row"><span class="lbl">parmi</span><button id="bUseCams" class="on">Caméras</button><button id="bUseVids" class="on">Vidéos</button></div>
+      </div>
+    </section>
+
+    <div id="foot">Clavier : Espace tap · 0–7 kick · A…I fond · V bords · B fond aléatoire · X aucun fond · C source · K chats · L alpagas · M miroir · H projection · F plein écran</div>
+  </aside>
+</div>
 
 <div id="start">
   <h1>DJ Crowd Screen</h1>
-  <p>Prototype v5 : caméras et vidéos, transitions, effets kick, effets de fond et pluie d’animaux.</p>
+  <p>Prototype v6 : écran partagé, réglages en onglets et effets de bords.</p>
   <button id="go">Démarrer</button>
   <p id="err"></p>
-</div>
-
-<button id="showUi" hidden>⚙︎</button>
-
-<div id="ui" hidden>
-  <div class="row"><div id="dot"></div><div id="status">—</div></div>
-  <div class="row"><div id="now">—</div></div>
-
-  <h3>Audio</h3>
-  <div class="row"><span class="lbl">Niveau</span><div id="meter"><div id="meterFill"></div><div id="meterThr"></div></div></div>
-  <div class="grid">
-    <span class="lbl">Fréquence d'écoute</span><input id="freq" type="range" min="60" max="400" step="10" value="140"><span class="val" id="freqV"></span>
-    <span class="lbl">Sensibilité</span><input id="sens" type="range" min="1.1" max="3" step="0.05" value="1.5"><span class="val" id="sensV"></span>
-  </div>
-
-  <h3>Effet kick (un seul à la fois)</h3>
-  <div class="chips" id="kickChips"></div>
-  <div class="grid">
-    <span class="lbl">Intensité kick</span><input id="amt" type="range" min="0.2" max="1.5" step="0.05" value="1"><span class="val" id="amtV"></span>
-    <span class="lbl">Durée (ms)</span><input id="dur" type="range" min="80" max="700" step="10" value="260"><span class="val" id="durV"></span>
-  </div>
-
-  <h3>Effets de fond (combinables)</h3>
-  <div class="chips" id="bgChips"></div>
-  <div class="row"><button id="bBgRand">Combinaison aléatoire</button><button id="bBgClear">Aucun fond</button></div>
-  <div class="grid">
-    <span class="lbl">Intensité fond</span><input id="bgAmt" type="range" min="0.2" max="1.5" step="0.05" value="1"><span class="val" id="bgAmtV"></span>
-    <span class="lbl">Vitesse fond</span><input id="bgSpeed" type="range" min="0" max="3" step="0.05" value="1"><span class="val" id="bgSpeedV"></span>
-  </div>
-
-  <h3>Pluie d'animaux (à chaque kick)</h3>
-  <div class="row"><button id="bCats">🐱 Chats</button><button id="bAlp">🦙 Alpagas</button><button id="bCatsClear">Vider</button></div>
-  <div class="row"><button id="bOver">Au-dessus des effets</button><span class="lbl">sinon, les animaux passent dans les effets</span></div>
-  <div class="grid">
-    <span class="lbl">Animaux par kick</span><input id="catN" type="range" min="1" max="8" step="1" value="3"><span class="val" id="catNV"></span>
-    <span class="lbl">% en panique</span><input id="catPanic" type="range" min="0" max="100" step="5" value="50"><span class="val" id="catPanicV"></span>
-    <span class="lbl">Taille</span><input id="catSize" type="range" min="0.5" max="2" step="0.05" value="1"><span class="val" id="catSizeV"></span>
-  </div>
-
-  <h3>Rotations automatiques</h3>
-  <div class="row">
-    <span class="lbl">Mode</span>
-    <span class="seg"><button id="mSync">Synchronisées</button><button id="mIndep" class="on">Indépendantes</button></span>
-  </div>
-  <div class="row">
-    <button id="bAutoKick" class="on">Auto kick</button>
-    <span data-mode="indep" class="row"><span class="lbl">tous les</span><input id="kickEvery" type="number" min="1" value="16"><span class="lbl">kicks</span></span>
-  </div>
-  <div class="row">
-    <button id="bAutoBg" class="on">Auto fond</button>
-    <span data-mode="indep" class="row"><span class="lbl">tous les</span><input id="bgEvery" type="number" min="1" value="32"><span class="lbl">kicks</span></span>
-    <span class="lbl">max</span><input id="bgMax" type="number" min="1" max="4" value="2"><span class="lbl">combinés</span>
-  </div>
-  <div class="row" data-mode="sync" hidden>
-    <span class="lbl">Changer kick et fond ensemble tous les</span><input id="syncEvery" type="number" min="1" value="16"><span class="lbl">kicks</span>
-  </div>
-  <div class="row">
-    <button id="bAutoCam" class="on">Auto source</button>
-    <span class="lbl">tous les</span><input id="camEvery" type="number" min="1" value="32"><span class="lbl">kicks, parmi :</span>
-    <button id="bUseCams" class="on">Caméras</button><button id="bUseVids" class="on">Vidéos</button>
-  </div>
-
-  <h3>Sources vidéo</h3>
-  <div class="row"><span class="lbl">Source</span><select id="selCam"></select><button id="bCam">▶</button></div>
-  <div class="row">
-    <button id="bAddVid">＋ Ajouter des vidéos</button>
-    <input id="fileVid" type="file" accept="video/*" multiple hidden>
-    <span class="lbl">tournent en boucle comme une caméra</span>
-  </div>
-  <div class="chips" id="vidList"></div>
-
-  <h3>Transition au changement de source</h3>
-  <div class="chips" id="trChips"></div>
-  <div class="grid">
-    <span class="lbl">Durée (ms)</span><input id="trDur" type="range" min="100" max="2500" step="50" value="800"><span class="val" id="trDurV"></span>
-  </div>
-
-  <h3>Divers</h3>
-  <div class="row"><span class="lbl">Micro</span><select id="selMic"></select></div>
-  <div class="row">
-    <button id="bTap">Tap kick</button>
-    <button id="bMirror">Miroir caméra</button>
-    <button id="bFull">Plein écran</button>
-    <button id="bHide">Masquer</button>
-  </div>
-  <div id="hint">Clavier : 0–7 effet kick · rangée du haut (A…I) effets de fond · B fond aléatoire · X aucun fond · K chats · L alpagas · N kick suivant · C source suivante · Espace tap · M miroir · F plein écran · H panneau</div>
 </div>
 
 <script>
@@ -165,6 +288,7 @@ const S = {
   mirror: false, autoKick: true, autoBg: true, autoCam: true, sync: false,
   sources: [], srcIdx: -1, video: null, switchToken: 0, prevEl: null,
   curDims: [16, 9], prevDims: [16, 9], curMir: false, prevMir: false,
+  edge: -1, edgeT: 0, edgePulse: true, autoEdge: false,
   tr: 0, trStart: 0, trDur: 0, trChoice: -1, useCams: true, useVids: true, bgTime: 0, clearAcc: true,
 };
 
@@ -190,6 +314,8 @@ uniform sampler2D uTex, uPrev;
 uniform vec2 uRes, uVid, uVidP;
 uniform float uTime, uKick, uSeed, uMirror, uMirP, uAmt, uCatOn, uMix, uClock;
 uniform int uTr;
+uniform int uEdge;
+uniform float uEdgeAmt, uEdgeSize, uEdgeT, uEdgePulse;
 uniform sampler2D uCats;
 uniform int uK;
 uniform float uBg[10];
@@ -240,6 +366,86 @@ vec3 samp(vec2 uv){
   vec3 v = source(uv);
   if (uCatOn > 0.5) { vec4 c = texture2D(uCats, uv); v = mix(v, c.rgb, c.a); }
   return v;
+}
+
+/* ---- Bruit et palette pour les effets de bords ---- */
+float hash2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7)))*43758.5453); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0 - 2.0*f);
+  return mix(mix(hash2(i), hash2(i+vec2(1.0,0.0)), u.x),
+             mix(hash2(i+vec2(0.0,1.0)), hash2(i+vec2(1.0,1.0)), u.x), u.y);
+}
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++){ v += a*vnoise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+vec3 pal(float x){ return 0.5 + 0.5*cos(6.2831853*(x + vec3(0.0, 0.33, 0.67))); }
+
+vec3 edgeFx(vec3 col){
+  float ar = uRes.x/uRes.y;
+  vec2 p = (vUv - 0.5)*vec2(ar, 1.0);
+  float e = min(0.5*ar - abs(p.x), 0.5 - abs(p.y));     // distance au bord du cadre
+  float ang = atan(p.y, p.x);
+  float t = uEdgeT;
+  float W = uEdgeSize*(1.0 + 0.7*uEdgePulse);
+  float A = uEdgeAmt;
+
+  if (uEdge == 0) {                       // Halo arc-en-ciel
+    float wob = 0.4*W*(sin(ang*5.0 + t*1.5) + 0.6*sin(ang*11.0 - t*2.3));
+    float m = 1.0 - smoothstep(0.0, W + wob, e);
+    return mix(col, pal(ang/6.2831853 + t*0.08 + e*2.5)*1.2, m*A);
+  }
+  if (uEdge == 1) {                       // Plasma
+    vec2 q = p*3.0;
+    float v = sin(q.x*3.0 + t) + sin(q.y*3.5 - t*1.3) + sin((q.x+q.y)*2.5 + t*0.7) + sin(length(q)*4.0 - t*2.0);
+    float n = fbm(p*4.0 + t*0.2);
+    float m = 1.0 - smoothstep(W*0.4, W*(1.1 + 0.8*n), e);
+    return mix(col, pal(v*0.15 + t*0.05), m*A);
+  }
+  if (uEdge == 2) {                       // Néon ondulant
+    float L1 = W*(0.5 + 0.3*sin(ang*7.0 + t*2.5));
+    float L2 = W*(0.95 + 0.25*sin(ang*5.0 - t*1.8 + 1.0));
+    float g1 = smoothstep(0.012, 0.0, abs(e - L1)) + 0.6*exp(-abs(e - L1)*45.0);
+    float g2 = smoothstep(0.009, 0.0, abs(e - L2)) + 0.5*exp(-abs(e - L2)*45.0);
+    vec3 c1 = pal(0.92 + 0.1*sin(t*0.5)), c2 = pal(0.45 + 0.1*sin(t*0.4));
+    col *= 1.0 - 0.7*A*(1.0 - smoothstep(0.0, L1, e));
+    return col + (c1*g1 + c2*g2)*A*1.4;
+  }
+  if (uEdge == 3) {                       // Lave (blobs)
+    vec2 hb = vec2(0.5*ar, 0.5);
+    float f = 0.0;
+    for (int i = 0; i < 12; i++){
+      float fi = float(i);
+      float a = fi/12.0*6.2831853 + t*0.12*(mod(fi, 2.0)*2.0 - 1.0) + 0.3*sin(t*0.3 + fi);
+      vec2 d = vec2(cos(a), sin(a));
+      float k = min(hb.x/max(abs(d.x), 1e-3), hb.y/max(abs(d.y), 1e-3));
+      vec2 c = d*k*(0.96 + 0.06*sin(t*1.3 + fi*2.0));
+      float r = W*(0.55 + 0.35*sin(t*0.9 + fi*1.7));
+      vec2 q = p - c;
+      f += r*r/(dot(q, q) + 1e-4);
+    }
+    float band = W*0.3/max(e, 0.002);
+    f += band*band;                                       // bordure continue + blobs qui s'en détachent
+    float m = smoothstep(0.85, 1.05, f);
+    vec3 c = mix(vec3(1.0, 0.18, 0.35), vec3(1.0, 0.85, 0.25), smoothstep(1.0, 4.0, f));
+    c = hueRot(c, t*0.15);
+    return mix(col, c, m*A);
+  }
+  if (uEdge == 4) {                       // Vagues
+    float ee = e + 0.025*sin(ang*6.0 + t*1.5) + 0.015*sin(ang*13.0 - t*2.0);
+    float m = 1.0 - smoothstep(W*0.8, W*1.25, ee);
+    float band = 0.5 + 0.5*sin(ee*70.0 - t*4.0);
+    vec3 c = pal(ee*3.0 - t*0.3)*(0.45 + 0.65*band);
+    return mix(col, c, m*A);
+  }
+  // 5 : Fumée psychédélique
+  vec2 q = p*2.5;
+  vec2 w = vec2(fbm(q + t*0.15), fbm(q + vec2(5.2, 1.3) - t*0.12));
+  float n = fbm(q + 2.0*w + t*0.05);
+  float m = 1.0 - smoothstep(W*0.2, W*(0.8 + 1.4*n), e);
+  return mix(col, pal(n*1.5 + t*0.07 + w.x)*1.3, m*A*0.95);
 }
 
 vec3 thermal(float l){
@@ -328,8 +534,8 @@ void main(){
   else if (uK == 5) col *= 1.0 + 0.2*k;
   else if (uK == 6) col = mix(col, vec3(1.0), kc*0.85);
 
-  float v = smoothstep(0.95, 0.3, length(vUv-0.5));
-  col *= mix(0.7, 1.0, v);
+  if (uEdge >= 0) col = edgeFx(col);
+  else col *= mix(0.7, 1.0, smoothstep(0.95, 0.3, length(vUv-0.5)));
   gl_FragColor = vec4(clamp(col,0.0,1.0), 1.0);
 }`;
 
@@ -388,7 +594,7 @@ function freeTarget(x){ if (x){ gl.deleteTexture(x.t); gl.deleteFramebuffer(x.f)
 let P, PC, PB, vidTex, prevTex, catTex, sceneT, acc = [null, null], accR = 0;
 function initGL(){
   if (!gl) throw new Error('WebGL non disponible sur ce navigateur.');
-  P  = program(FS_SCENE, ['uTex','uRes','uVid','uTime','uKick','uSeed','uMirror','uAmt','uK','uBg','uCats','uCatOn','uPrev','uVidP','uMirP','uMix','uClock','uTr']);
+  P  = program(FS_SCENE, ['uTex','uRes','uVid','uTime','uKick','uSeed','uMirror','uAmt','uK','uBg','uCats','uCatOn','uPrev','uVidP','uMirP','uMix','uClock','uTr','uEdge','uEdgeAmt','uEdgeSize','uEdgeT','uEdgePulse']);
   PC = program(FS_COMP,  ['uScene','uPrev','uTrail','uTime']);
   PB = program(FS_BLIT,  ['uSrc']);
   const buf = gl.createBuffer();
@@ -406,7 +612,7 @@ function initGL(){
 }
 function resize(){
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.round(innerWidth*dpr), h = Math.round(innerHeight*dpr);
+  const st = $('stage'), w = Math.max(2, Math.round(st.clientWidth*dpr)), h = Math.max(2, Math.round(st.clientHeight*dpr));
   if (canvas.width !== w || canvas.height !== h || !sceneT){
     canvas.width = w; canvas.height = h;
     freeTarget(sceneT); freeTarget(acc[0]); freeTarget(acc[1]);
@@ -439,6 +645,8 @@ async function getCamVideo(deviceId){
   return v;
 }
 /* ================= Sources (caméras + vidéos) ================= */
+const EDGE = ['Halo arc-en-ciel', 'Plasma', 'Néon ondulant', 'Lave', 'Vagues', 'Fumée psyché'];
+function setEdge(i){ S.edge = i; [...$('edgeChips').children].forEach(b => b.classList.toggle('on', +b.dataset.i === i)); }
 const TRANS = ['Coupure', 'Fondu', 'Glitch', 'Zoom', 'Volet', 'Flash'];
 function whenReady(el){
   if (el.readyState >= 2) return Promise.resolve();
@@ -579,10 +787,12 @@ function kick(now){
     if (n % every('syncEvery') === 0){
       if (S.autoKick) setKick(randomOther(KICK.length, S.kfx));
       if (S.autoBg) randomBg();
+      if (S.autoEdge) setEdge(randomOther(EDGE.length, S.edge));
     }
   } else {
     if (S.autoKick && n % every('kickEvery') === 0) setKick(randomOther(KICK.length, S.kfx));
     if (S.autoBg && n % every('bgEvery') === 0) randomBg();
+    if (S.autoEdge && n % every('edgeEvery') === 0) setEdge(randomOther(EDGE.length, S.edge));
   }
   if (S.autoCam && n % every('camEvery') === 0){ const j = nextAutoSource(); if (j >= 0) switchSource(j); }
   if (S.cats || S.alpacas) spawnCats();
@@ -896,7 +1106,7 @@ function drawAlpaca(c, t){
 
 function renderCats(dt, now){
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.round(innerWidth*dpr), h = Math.round(innerHeight*dpr);
+  const st = $('stage'), w = Math.max(2, Math.round(st.clientWidth*dpr)), h = Math.max(2, Math.round(st.clientHeight*dpr));
   if (c2.width !== w || c2.height !== h){ c2.width = w; c2.height = h; c2._dpr = dpr; }
   cx.clearRect(0, 0, w, h);
   if (!cats.length) return;
@@ -912,6 +1122,7 @@ function frame(now){
   detect(now);
   S.kick *= Math.exp(-dt*3 / +$('dur').value);
   S.bgTime += dt/1000 * +$('bgSpeed').value;
+  S.edgeT += dt/1000 * +$('edgeSpeed').value;
   resize();
 
   // Source courante (unité 0) et précédente pendant une transition (unité 3)
@@ -955,6 +1166,11 @@ function frame(now){
   gl.uniform1i(P.u.uTr, inTr ? S.tr : 0);
   gl.uniform1f(P.u.uMix, trP*trP*(3 - 2*trP));
   gl.uniform1f(P.u.uClock, now/1000);
+  gl.uniform1i(P.u.uEdge, S.edge);
+  gl.uniform1f(P.u.uEdgeAmt, +$('edgeAmt').value);
+  gl.uniform1f(P.u.uEdgeSize, +$('edgeSize').value);
+  gl.uniform1f(P.u.uEdgeT, S.edgeT);
+  gl.uniform1f(P.u.uEdgePulse, S.edgePulse ? Math.min(1, S.kick) : 0);
   gl.uniform1f(P.u.uAmt, bgAmt);
   gl.uniform1i(P.u.uK, S.kfx);
   gl.uniform1fv(P.u.uBg, bgArr);
@@ -1059,6 +1275,25 @@ function setupUi(){
   $('mIndep').onclick = () => setMode(false);
   toggleBtn('bAutoKick', 'autoKick');
   toggleBtn('bAutoBg', 'autoBg');
+  toggleBtn('bAutoEdge', 'autoEdge');
+  toggleBtn('bEdgePulse', 'edgePulse');
+  $('edgeChips').append(chip('Aucun', 'edgefx', -1, () => setEdge(-1)));
+  EDGE.forEach((n, i) => $('edgeChips').append(chip(n, 'edgefx', i, () => setEdge(i))));
+  setEdge(-1);
+  bindSlider('edgeAmt', v => (+v).toFixed(2));
+  bindSlider('edgeSize', v => (+v).toFixed(2));
+  bindSlider('edgeSpeed', v => '×' + (+v).toFixed(2));
+
+  // Onglets
+  const tabs = [...document.querySelectorAll('#tabs button')];
+  const showTab = name => {
+    tabs.forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.dataset.pane === name));
+    try { localStorage.setItem('dcs-tab', name); } catch(e){}
+  };
+  tabs.forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  let saved = 'kick'; try { saved = localStorage.getItem('dcs-tab') || 'kick'; } catch(e){}
+  showTab(tabs.some(b => b.dataset.tab === saved) ? saved : 'kick');
   toggleBtn('bAutoCam', 'autoCam');
   toggleBtn('bMirror', 'mirror');
   toggleBtn('bCats', 'cats');
@@ -1100,6 +1335,7 @@ function setupUi(){
     else if (k === 'c') switchSource(S.srcIdx + 1);
     else if (k === 'n') setKick((S.kfx + 1) % KICK.length);
     else if (k === 'b') randomBg();
+    else if (k === 'v') setEdge(S.edge + 1 >= EDGE.length ? -1 : S.edge + 1);
     else if (k === 'x'){ S.bg.clear(); refreshBg(); }
     else if (k === 'm') $('bMirror').click();
     else if (k === 'k') $('bCats').click();
