@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DJ Crowd Screen — prototype v4</title>
+<title>DJ Crowd Screen — prototype v5</title>
 <style>
   :root { --acc:#ff2d75; --bg2:#8b5cf6; --bg:rgba(12,12,16,.85); --fg:#f2f2f5; --mut:#9a9aa8; }
   * { box-sizing:border-box; }
@@ -58,7 +58,7 @@
 
 <div id="start">
   <h1>DJ Crowd Screen</h1>
-  <p>Prototype v4 : caméras, effets kick, effets de fond et pluie d’animaux.</p>
+  <p>Prototype v5 : caméras et vidéos, transitions, effets kick, effets de fond et pluie d’animaux.</p>
   <button id="go">Démarrer</button>
   <p id="err"></p>
 </div>
@@ -118,21 +118,35 @@
     <span class="lbl">Changer kick et fond ensemble tous les</span><input id="syncEvery" type="number" min="1" value="16"><span class="lbl">kicks</span>
   </div>
   <div class="row">
-    <button id="bAutoCam" class="on">Auto caméra</button>
-    <span class="lbl">tous les</span><input id="camEvery" type="number" min="1" value="32"><span class="lbl">kicks</span>
+    <button id="bAutoCam" class="on">Auto source</button>
+    <span class="lbl">tous les</span><input id="camEvery" type="number" min="1" value="32"><span class="lbl">kicks, parmi :</span>
+    <button id="bUseCams" class="on">Caméras</button><button id="bUseVids" class="on">Vidéos</button>
   </div>
 
-  <h3>Sources</h3>
-  <div class="row"><span class="lbl">Caméra</span><select id="selCam"></select></div>
+  <h3>Sources vidéo</h3>
+  <div class="row"><span class="lbl">Source</span><select id="selCam"></select><button id="bCam">▶</button></div>
+  <div class="row">
+    <button id="bAddVid">＋ Ajouter des vidéos</button>
+    <input id="fileVid" type="file" accept="video/*" multiple hidden>
+    <span class="lbl">tournent en boucle comme une caméra</span>
+  </div>
+  <div class="chips" id="vidList"></div>
+
+  <h3>Transition au changement de source</h3>
+  <div class="chips" id="trChips"></div>
+  <div class="grid">
+    <span class="lbl">Durée (ms)</span><input id="trDur" type="range" min="100" max="2500" step="50" value="800"><span class="val" id="trDurV"></span>
+  </div>
+
+  <h3>Divers</h3>
   <div class="row"><span class="lbl">Micro</span><select id="selMic"></select></div>
   <div class="row">
-    <button id="bCam">Caméra ▶</button>
     <button id="bTap">Tap kick</button>
     <button id="bMirror">Miroir caméra</button>
     <button id="bFull">Plein écran</button>
     <button id="bHide">Masquer</button>
   </div>
-  <div id="hint">Clavier : 0–7 effet kick · rangée du haut (A…I) effets de fond · B fond aléatoire · X aucun fond · K chats · L alpagas · N kick suivant · C caméra · Espace tap · M miroir · F plein écran · H panneau</div>
+  <div id="hint">Clavier : 0–7 effet kick · rangée du haut (A…I) effets de fond · B fond aléatoire · X aucun fond · K chats · L alpagas · N kick suivant · C source suivante · Espace tap · M miroir · F plein écran · H panneau</div>
 </div>
 
 <script>
@@ -149,7 +163,9 @@ const BG_SLOTS = [...BG.keys()].filter(i => BG[i]);
 const S = {
   kfx: 0, bg: new Set([4]), kick: 0, seed: 0, lastKick: 0, kicks: 0, intervals: [],
   mirror: false, autoKick: true, autoBg: true, autoCam: true, sync: false,
-  cams: [], camIdx: 0, video: null, switchToken: 0, bgTime: 0, clearAcc: true,
+  sources: [], srcIdx: -1, video: null, switchToken: 0, prevEl: null,
+  curDims: [16, 9], prevDims: [16, 9], curMir: false, prevMir: false,
+  tr: 0, trStart: 0, trDur: 0, trChoice: -1, useCams: true, useVids: true, bgTime: 0, clearAcc: true,
 };
 
 /* ================= WebGL ================= */
@@ -170,25 +186,58 @@ vec3 hueRot(vec3 c, float a){
 
 const FS_SCENE = `precision highp float;
 varying vec2 vUv;
-uniform sampler2D uTex;
-uniform vec2 uRes, uVid;
-uniform float uTime, uKick, uSeed, uMirror, uAmt, uCatOn;
+uniform sampler2D uTex, uPrev;
+uniform vec2 uRes, uVid, uVidP;
+uniform float uTime, uKick, uSeed, uMirror, uMirP, uAmt, uCatOn, uMix, uClock;
+uniform int uTr;
 uniform sampler2D uCats;
 uniform int uK;
 uniform float uBg[10];
 ${COMMON}
 
-vec2 cover(vec2 uv){
+vec2 cover(vec2 uv, vec2 vid, float mir){
   float sr = uRes.x/uRes.y;
-  float vr = uVid.x/max(uVid.y,1.0);
+  float vr = vid.x/max(vid.y,1.0);
   vec2 s = sr > vr ? vec2(1.0, vr/sr) : vec2(sr/vr, 1.0);
-  uv = (uv-0.5)*s + 0.5;
-  if (uMirror > 0.5) uv.x = 1.0 - uv.x;
+  uv = (clamp(uv,0.0,1.0)-0.5)*s + 0.5;
+  if (mir > 0.5) uv.x = 1.0 - uv.x;
   return uv;
 }
+vec3 srcCur(vec2 uv){ return texture2D(uTex, cover(uv, uVid, uMirror)).rgb; }
+vec3 srcPrev(vec2 uv){ return texture2D(uPrev, cover(uv, uVidP, uMirP)).rgb; }
+
+/* Transition entre l'ancienne source (prev) et la nouvelle (cur) */
+vec3 source(vec2 uv){
+  if (uTr < 1) return srcCur(uv);
+  float m = uMix;
+  if (uTr == 1) return mix(srcPrev(uv), srcCur(uv), m);                       // Fondu
+  if (uTr == 2) {                                                              // Glitch
+    float f = floor(uClock*30.0);
+    float row = floor(uv.y*mix(10.0, 40.0, hash(f)));
+    float burst = 1.0 - abs(2.0*m - 1.0);
+    vec2 o = vec2((hash(row*3.1 + f) - 0.5)*0.25*burst, 0.0);
+    vec3 c = hash(row + f) < m ? srcCur(uv + o) : srcPrev(uv - o);
+    return mix(c, floor(c*4.0)/4.0, burst*0.6);
+  }
+  if (uTr == 3) {                                                              // Zoom
+    vec3 a = srcPrev((uv-0.5)*(1.0 - 0.6*m) + 0.5);
+    vec3 b = srcCur((uv-0.5)*(0.4 + 0.6*m) + 0.5);
+    return mix(a, b, smoothstep(0.35, 0.65, m)) * (1.0 + 0.6*(1.0 - abs(2.0*m - 1.0)));
+  }
+  if (uTr == 4) {                                                              // Volet
+    float e = uv.x*0.85 + (1.0 - uv.y)*0.15;
+    float w = 1.0 - smoothstep(m*1.2 - 0.1, m*1.2, e);
+    vec3 c = mix(srcPrev(uv), srcCur(uv), w);
+    float edge = 1.0 - smoothstep(0.0, 0.03, abs(e - (m*1.2 - 0.05)));
+    return c + edge*vec3(1.0, 0.2, 0.5)*step(0.01, m)*step(m, 0.99);
+  }
+  vec3 c = m < 0.5 ? srcPrev(uv) : srcCur(uv);                                 // Flash
+  return mix(c, vec3(1.0), 1.0 - abs(2.0*m - 1.0));
+}
+
 vec3 samp(vec2 uv){
   uv = clamp(uv, 0.0, 1.0);
-  vec3 v = texture2D(uTex, cover(uv)).rgb;
+  vec3 v = source(uv);
   if (uCatOn > 0.5) { vec4 c = texture2D(uCats, uv); v = mix(v, c.rgb, c.a); }
   return v;
 }
@@ -336,10 +385,10 @@ function makeTarget(w, h){
 }
 function freeTarget(x){ if (x){ gl.deleteTexture(x.t); gl.deleteFramebuffer(x.f); } }
 
-let P, PC, PB, vidTex, catTex, sceneT, acc = [null, null], accR = 0;
+let P, PC, PB, vidTex, prevTex, catTex, sceneT, acc = [null, null], accR = 0;
 function initGL(){
   if (!gl) throw new Error('WebGL non disponible sur ce navigateur.');
-  P  = program(FS_SCENE, ['uTex','uRes','uVid','uTime','uKick','uSeed','uMirror','uAmt','uK','uBg','uCats','uCatOn']);
+  P  = program(FS_SCENE, ['uTex','uRes','uVid','uTime','uKick','uSeed','uMirror','uAmt','uK','uBg','uCats','uCatOn','uPrev','uVidP','uMirP','uMix','uClock','uTr']);
   PC = program(FS_COMP,  ['uScene','uPrev','uTrail','uTime']);
   PB = program(FS_BLIT,  ['uSrc']);
   const buf = gl.createBuffer();
@@ -351,6 +400,8 @@ function initGL(){
   catTex = newTex();
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,0]));
   vidTex = newTex();
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,255]));
+  prevTex = newTex();
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,255]));
 }
 function resize(){
@@ -387,16 +438,95 @@ async function getCamVideo(deviceId){
   await v.play().catch(()=>{});
   return v;
 }
-async function switchCam(i){
-  if (!S.cams.length) return;
-  i = ((i % S.cams.length) + S.cams.length) % S.cams.length;
+/* ================= Sources (caméras + vidéos) ================= */
+const TRANS = ['Coupure', 'Fondu', 'Glitch', 'Zoom', 'Volet', 'Flash'];
+function whenReady(el){
+  if (el.readyState >= 2) return Promise.resolve();
+  return new Promise(res => {
+    const done = () => res();
+    el.addEventListener('loadeddata', done, { once: true });
+    setTimeout(done, 2000);
+  });
+}
+async function sourceEl(src){
+  if (src.type === 'cam') return getCamVideo(src.deviceId);
+  await src.el.play().catch(()=>{});
+  return src.el;
+}
+function pickTransition(){
+  if (S.trChoice >= 0) return S.trChoice;
+  return 1 + Math.floor(Math.random()*(TRANS.length - 1));   // aléatoire, hors coupure
+}
+async function switchSource(i){
+  const n = S.sources.length;
+  if (!n) return;
+  i = ((i % n) + n) % n;
+  if (i === S.srcIdx && S.video) return;
   const token = ++S.switchToken;
+  const src = S.sources[i];
   try {
-    const v = await getCamVideo(S.cams[i].deviceId);
+    const el = await sourceEl(src);
+    await whenReady(el);
     if (token !== S.switchToken) return;
-    S.camIdx = i; S.video = v;
-    $('selCam').value = S.cams[i].deviceId;
-  } catch(e){ console.warn('Caméra indisponible', e); }
+    const oldEl = S.video, oldSrc = S.sources[S.srcIdx];
+    // l'ancienne image passe dans la texture « précédente »
+    [vidTex, prevTex] = [prevTex, vidTex];
+    S.prevEl = oldEl; S.prevDims = S.curDims; S.prevMir = S.curMir;
+    S.video = el; S.srcIdx = i; S.curMir = src.type === 'cam';
+    S.tr = oldEl ? pickTransition() : 0;
+    S.trDur = S.tr === 0 ? 0 : +$('trDur').value;
+    S.trStart = performance.now();
+    $('selCam').value = String(i);
+    if (oldSrc && oldSrc.type === 'video' && oldEl !== el)
+      setTimeout(() => { if (S.video !== oldEl) oldEl.pause(); }, S.trDur + 300);
+  } catch(e){ console.warn('Source indisponible', e); }
+}
+function nextAutoSource(){
+  const ok = S.sources.map((s, i) => i).filter(i => i !== S.srcIdx &&
+    ((S.sources[i].type === 'cam' && S.useCams) || (S.sources[i].type === 'video' && S.useVids)));
+  return ok.length ? ok[Math.floor(Math.random()*ok.length)] : -1;
+}
+function refreshSources(){
+  const sel = $('selCam'); sel.innerHTML = '';
+  S.sources.forEach((src, i) => sel.add(new Option(src.label, String(i))));
+  if (S.srcIdx >= 0) sel.value = String(S.srcIdx);
+  const list = $('vidList'); list.innerHTML = '';
+  S.sources.forEach((src, i) => {
+    if (src.type !== 'video') return;
+    const b = document.createElement('button');
+    b.className = 'chip'; b.textContent = src.label + '  ✕';
+    b.title = 'Retirer cette vidéo';
+    b.onclick = () => removeSource(i);
+    list.append(b);
+  });
+}
+function addVideo(url, name, isBlob){
+  const el = document.createElement('video');
+  el.muted = true; el.loop = true; el.playsInline = true; el.setAttribute('playsinline','');
+  el.preload = 'auto'; el.src = url; el.load();
+  S.sources.push({ type: 'video', label: '🎞 ' + name.replace(/\.[^.]+$/, ''), el, url, isBlob });
+}
+async function removeSource(i){
+  const src = S.sources[i];
+  if (!src || src.type !== 'video') return;
+  if (i === S.srcIdx){
+    const j = S.sources.findIndex((s, k) => k !== i);
+    if (j < 0) return;
+    S.tr = 0; await switchSource(j);
+  }
+  src.el.pause(); if (src.isBlob) URL.revokeObjectURL(src.url);
+  S.sources.splice(i, 1);
+  if (S.srcIdx > i) S.srcIdx--;
+  refreshSources();
+}
+async function loadRepoVideos(){
+  // Optionnel : vidéos déposées dans le dossier « videos/ » du dépôt, listées dans videos/list.json
+  try {
+    const r = await fetch('videos/list.json', { cache: 'no-store' });
+    if (!r.ok) return;
+    const list = await r.json();
+    for (const f of list) addVideo('videos/' + encodeURIComponent(f), f, false);
+  } catch(e){}
 }
 function randomOther(n, cur){ if (n < 2) return cur; let r; do { r = Math.floor(Math.random()*n); } while (r === cur); return r; }
 
@@ -454,7 +584,7 @@ function kick(now){
     if (S.autoKick && n % every('kickEvery') === 0) setKick(randomOther(KICK.length, S.kfx));
     if (S.autoBg && n % every('bgEvery') === 0) randomBg();
   }
-  if (S.autoCam && n % every('camEvery') === 0) switchCam(randomOther(S.cams.length, S.camIdx));
+  if (S.autoCam && n % every('camEvery') === 0){ const j = nextAutoSource(); if (j >= 0) switchSource(j); }
   if (S.cats || S.alpacas) spawnCats();
   const d = $('dot'); d.classList.add('hit'); setTimeout(() => d.classList.remove('hit'), 70);
 }
@@ -784,14 +914,21 @@ function frame(now){
   S.bgTime += dt/1000 * +$('bgSpeed').value;
   resize();
 
-  const v = S.video;
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, vidTex);
-  let vw = 16, vh = 9;
-  if (v && v.readyState >= 2 && v.videoWidth){
-    try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v); } catch(e){}
-    vw = v.videoWidth; vh = v.videoHeight;
-  }
+  // Source courante (unité 0) et précédente pendant une transition (unité 3)
+  const trP = S.trDur > 0 ? Math.min(1, (now - S.trStart)/S.trDur) : 1;
+  const inTr = trP < 1 && S.tr > 0;
+  const upload = (unit, tex, el) => {
+    gl.activeTexture(unit); gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (el && el.readyState >= 2 && el.videoWidth){
+      try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el); } catch(e){}
+      return [el.videoWidth, el.videoHeight];
+    }
+    return null;
+  };
+  S.prevDims = (inTr && upload(gl.TEXTURE3, prevTex, S.prevEl)) || S.prevDims;
+  if (!inTr){ gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, prevTex); }
+  S.curDims = upload(gl.TEXTURE0, vidTex, S.video) || S.curDims;
+  const [vw, vh] = S.curDims, [pw, ph] = S.prevDims;
 
   // Animaux : dessinés sur un calque 2D puis injectés dans le rendu (ils subissent les effets)
   renderCats(dt, now);
@@ -811,7 +948,13 @@ function frame(now){
   gl.uniform1f(P.u.uTime, S.bgTime);
   gl.uniform1f(P.u.uKick, S.kfx < 0 ? 0 : Math.min(1.5, S.kick * +$('amt').value));
   gl.uniform1f(P.u.uSeed, S.seed);
-  gl.uniform1f(P.u.uMirror, S.mirror ? 1 : 0);
+  gl.uniform1f(P.u.uMirror, S.mirror && S.curMir ? 1 : 0);
+  gl.uniform1f(P.u.uMirP, S.mirror && S.prevMir ? 1 : 0);
+  gl.uniform1i(P.u.uPrev, 3);
+  gl.uniform2f(P.u.uVidP, pw, ph);
+  gl.uniform1i(P.u.uTr, inTr ? S.tr : 0);
+  gl.uniform1f(P.u.uMix, trP*trP*(3 - 2*trP));
+  gl.uniform1f(P.u.uClock, now/1000);
   gl.uniform1f(P.u.uAmt, bgAmt);
   gl.uniform1i(P.u.uK, S.kfx);
   gl.uniform1fv(P.u.uBg, bgArr);
@@ -854,8 +997,8 @@ function frame(now){
     $('meterFill').style.background = lastRatio > sens ? 'var(--acc)' : '#5ad1a0';
     $('meterThr').style.left = (sens/max*100) + '%';
     const b = bpm();
-    const cam = S.cams[S.camIdx];
-    $('status').textContent = `${b ? b + ' BPM' : '— BPM'} · basses ${(lastRms*1000).toFixed(1)} · ${S.kicks} kicks · ${cam ? (cam.label || 'Caméra ' + (S.camIdx+1)) : 'pas de caméra'}`;
+    const cam = S.sources[S.srcIdx];
+    $('status').textContent = `${b ? b + ' BPM' : '— BPM'} · basses ${(lastRms*1000).toFixed(1)} · ${S.kicks} kicks · ${cam ? cam.label : 'pas de source'}`;
     const bgNames = [...S.bg].sort((a,b)=>a-b).map(i => BG[i]).join(' + ') || 'aucun';
     $('now').textContent = `Kick : ${S.kfx < 0 ? 'aucun' : KICK[S.kfx]} · Fond : ${bgNames}`;
   }
@@ -881,6 +1024,10 @@ function chip(label, cls, i, onclick){
   const b = document.createElement('button');
   b.className = 'chip ' + cls; b.textContent = label; b.dataset.i = i; b.onclick = onclick;
   return b;
+}
+function setTr(i){
+  S.trChoice = i;
+  [...$('trChips').children].forEach(b => b.classList.toggle('on', +b.dataset.i === i));
 }
 function setMode(sync){
   S.sync = sync;
@@ -922,12 +1069,24 @@ function setupUi(){
   bindSlider('catPanic', v => v + ' %');
   bindSlider('catSize', v => '×' + (+v).toFixed(2));
 
-  $('bCam').onclick = () => switchCam(S.camIdx + 1);
+  $('bCam').onclick = () => switchSource(S.srcIdx + 1);
+  toggleBtn('bUseCams', 'useCams');
+  toggleBtn('bUseVids', 'useVids');
+  $('bAddVid').onclick = () => $('fileVid').click();
+  $('fileVid').onchange = e => {
+    for (const f of e.target.files) addVideo(URL.createObjectURL(f), f.name, true);
+    e.target.value = '';
+    refreshSources();
+  };
+  $('trChips').append(chip('Aléatoire', 'trc', -1, () => setTr(-1)));
+  TRANS.forEach((n, i) => $('trChips').append(chip(n, 'trc', i, () => setTr(i))));
+  setTr(-1);
+  bindSlider('trDur', v => v);
   $('bTap').onclick = () => kick();
   $('bFull').onclick = fullscreen;
   $('bHide').onclick = () => toggleUi(true);
   $('showUi').onclick = () => toggleUi(false);
-  $('selCam').onchange = e => switchCam(S.cams.findIndex(c => c.deviceId === e.target.value));
+  $('selCam').onchange = e => switchSource(+e.target.value);
   $('selMic').onchange = e => startMic(e.target.value).catch(err => console.warn(err));
 
   addEventListener('keydown', e => {
@@ -938,7 +1097,7 @@ function setupUi(){
     if (m){ const d = +m[1]; if (d === 0) setKick(-1); else if (d <= KICK.length) setKick(d-1); return; }
     const k = e.key.toLowerCase();
     if (k === ' '){ e.preventDefault(); kick(); }
-    else if (k === 'c') switchCam(S.camIdx + 1);
+    else if (k === 'c') switchSource(S.srcIdx + 1);
     else if (k === 'n') setKick((S.kfx + 1) % KICK.length);
     else if (k === 'b') randomBg();
     else if (k === 'x'){ S.bg.clear(); refreshBg(); }
@@ -962,19 +1121,23 @@ async function start(){
   await startMic();
 
   const devs = await navigator.mediaDevices.enumerateDevices();
-  S.cams = devs.filter(d => d.kind === 'videoinput');
+  const camDevs = devs.filter(d => d.kind === 'videoinput');
   const mics = devs.filter(d => d.kind === 'audioinput');
-  S.cams.forEach((c,i) => $('selCam').add(new Option(c.label || 'Caméra ' + (i+1), c.deviceId)));
+  camDevs.forEach((c,i) => S.sources.push({ type: 'cam', deviceId: c.deviceId, label: '📷 ' + (c.label || 'Caméra ' + (i+1)) }));
   mics.forEach((m,i) => $('selMic').add(new Option(m.label || 'Micro ' + (i+1), m.deviceId)));
   const curMic = micStream.getAudioTracks()[0].getSettings().deviceId;
   if (curMic) $('selMic').value = curMic;
 
   const firstId = first.getVideoTracks()[0].getSettings().deviceId;
   const v = makeVideo(first); await v.play().catch(()=>{});
-  let idx = S.cams.findIndex(c => c.deviceId === firstId);
-  if (idx < 0){ idx = 0; if (S.cams[0]) vids.set(S.cams[0].deviceId, v); } else vids.set(firstId, v);
-  S.camIdx = idx; S.video = v;
-  if (S.cams[idx]) $('selCam').value = S.cams[idx].deviceId;
+  let idx = S.sources.findIndex(c => c.deviceId === firstId);
+  if (idx < 0){
+    if (S.sources[0]){ idx = 0; vids.set(S.sources[0].deviceId, v); }
+    else { S.sources.push({ type: 'cam', deviceId: firstId || 'cam0', label: '📷 Caméra' }); idx = 0; vids.set(firstId || 'cam0', v); }
+  } else vids.set(firstId, v);
+  S.srcIdx = idx; S.video = v; S.curMir = true;
+  await loadRepoVideos();
+  refreshSources();
 
   try { await navigator.wakeLock?.request('screen'); } catch(e){}
   $('start').style.display = 'none';
