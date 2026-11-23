@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DJ Crowd Screen — prototype v9.1</title>
+<title>DJ Crowd Screen — prototype v9.2</title>
 <style>
   :root { --acc:#ff2d75; --bg2:#8b5cf6; --edge:#22c3e6; --panel:#0e0e13; --line:#23232c;
           --fg:#f2f2f5; --mut:#9a9aa8; --field:#1a1a21; }
@@ -227,6 +227,8 @@
         <div class="row"><button id="bFlock">🐦 Afficher la nuée</button></div>
         <div class="grid">
           <span class="lbl">Oiseaux</span><input id="flockN" type="range" min="500" max="4000" step="100" value="2000"><span class="val" id="flockNV"></span>
+          <span class="lbl">Taille des oiseaux</span><input id="birdSize" type="range" min="0.5" max="4" step="0.1" value="2"><span class="val" id="birdSizeV"></span>
+          <span class="lbl">Vitesse</span><input id="flockSpeed" type="range" min="0.2" max="2.5" step="0.05" value="1"><span class="val" id="flockSpeedV"></span>
           <span class="lbl">Force de la vague</span><input id="waveAmp" type="range" min="0" max="40" step="1" value="14"><span class="val" id="waveAmpV"></span>
         </div>
       </div>
@@ -833,11 +835,12 @@ const FLOCK = (() => {
 
   function draw(now){
     g.fillStyle = sky; g.fillRect(0, 0, W, H);
-    const amp = +$('waveAmp').value;
+    const amp = +$('waveAmp').value, size = +$('birdSize').value;
     for (let k = waves.length - 1; k >= 0; k--) if (now - waves[k].t0 > waves[k].dur) waves.splice(k, 1);
     g.fillStyle = 'rgba(20, 20, 26, 0.85)';
+    g.beginPath();                                 // un seul tracé pour tous les oiseaux (rapide)
     for (let i = 0; i < n; i++){
-      let x = px[i], y = py[i], s = 1.9;
+      let x = px[i], y = py[i], s = 1.9*size;
       for (const w of waves){
         const along = (x - w.cx)*w.c + (y - w.cy)*w.s;
         const front = -w.ext + (now - w.t0)/w.dur*(2*w.ext);
@@ -846,16 +849,22 @@ const FLOCK = (() => {
         if (env > 0.01){
           const o = amp*env*Math.sin(d*0.09);
           x += -w.s*o; y += w.c*o;                  // vibration perpendiculaire à la vague
-          s += env*1.6;                             // la bande paraît plus dense
+          s += env*1.6*size;                        // la bande paraît plus dense
         }
       }
-      g.fillRect(x - s/2, y - s/2, s, s);
+      const r = s*0.6;
+      g.moveTo(x + r, y); g.arc(x, y, r, 0, 6.2832);
     }
+    g.fill();
   }
 
   return {
     canvas: cv,
-    update(dt, now){ step(Math.min(3, dt/16.7)); draw(now); },
+    update(dt, now){
+      let d = Math.min(3, dt/16.7) * +$('flockSpeed').value;
+      while (d > 0){ const k = Math.min(1.5, d); step(k); d -= k; }   // sous-pas : stable même en accéléré
+      draw(now);
+    },
     kick(){
       const a = (Math.random() < 0.7 ? 0 : Math.PI/2) + (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5)*0.6;
       waves.push({ c: Math.cos(a), s: Math.sin(a), cx: cxF, cy: cyF, ext: ext + 60,
@@ -1583,6 +1592,8 @@ function setupUi(){
   $('bFlock').onclick = () => switchSource(S.sources.findIndex(x => x.type === 'flock'));
   bindSlider('flockN', v => v, v => FLOCK.setCount(v|0));
   bindSlider('waveAmp', v => v);
+  bindSlider('birdSize', v => '×' + (+v).toFixed(1));
+  bindSlider('flockSpeed', v => '×' + (+v).toFixed(2));
   $('bAddVid').onclick = () => $('fileVid').click();
   $('fileVid').onchange = e => {
     for (const f of e.target.files) addVideo(URL.createObjectURL(f), f.name, true);
