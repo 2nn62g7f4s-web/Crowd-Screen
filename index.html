@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DJ Crowd Screen — prototype v7</title>
+<title>DJ Crowd Screen — prototype v8</title>
 <style>
   :root { --acc:#ff2d75; --bg2:#8b5cf6; --edge:#22c3e6; --panel:#0e0e13; --line:#23232c;
           --fg:#f2f2f5; --mut:#9a9aa8; --field:#1a1a21; }
@@ -177,8 +177,12 @@
     <section class="pane" data-pane="bords">
       <div class="card">
         <h3>Effet sur les bords du cadre</h3>
-        <p class="help">Un contour animé qui ondule autour de l'image.</p>
+        <p class="help">Un contour animé aux coins arrondis, comme un vignettage.</p>
         <div class="chips" id="edgeChips"></div>
+        <span class="lbl">Colorés</span>
+        <div class="chips" id="edgeChipsC"></div>
+        <span class="lbl">Sombres (vignettage)</span>
+        <div class="chips" id="edgeChipsD"></div>
       </div>
       <div class="card">
         <h3>Réglages</h3>
@@ -277,7 +281,7 @@
 
 <div id="start">
   <h1>DJ Crowd Screen</h1>
-  <p>Prototype v7 : écran partagé, effets de bords et échos de mouvement.</p>
+  <p>Prototype v8 : bords arrondis et vignettages sombres.</p>
   <button id="go">Démarrer</button>
   <p id="err"></p>
 </div>
@@ -503,20 +507,24 @@ vec3 pal(float x){ return 0.5 + 0.5*cos(6.2831853*(x + vec3(0.0, 0.33, 0.67))); 
 vec4 edgeLayer(vec2 uv){
   float ar = uRes.x/uRes.y;
   vec2 p = (uv - 0.5)*vec2(ar, 1.0);
-  float e = min(0.5*ar - abs(p.x), 0.5 - abs(p.y));     // distance au bord du cadre
+  vec2 q = (uv - 0.5)*2.0;                               // -1..1 sur chaque axe
+  // Forme arrondie type vignettage (super-ellipse) : 0 au milieu des bords, négatif dans les coins
+  float r = pow(pow(abs(q.x), 2.6) + pow(abs(q.y), 2.6), 1.0/2.6);
+  float e = (1.0 - r)*0.5;
   float ang = atan(p.y, p.x);
   float t = uEdgeT;
   float W = uEdgeSize*(1.0 + 0.7*uEdgePulse);
   float A = uEdgeAmt;
 
+  /* ---------- Colorés ---------- */
   if (uEdge == 0) {                       // Halo arc-en-ciel
     float wob = 0.4*W*(sin(ang*5.0 + t*1.5) + 0.6*sin(ang*11.0 - t*2.3));
     float m = 1.0 - smoothstep(0.0, W + wob, e);
     return vec4(min(pal(ang/6.2831853 + t*0.08 + e*2.5)*1.2, 1.0), m*A);
   }
   if (uEdge == 1) {                       // Plasma
-    vec2 q = p*3.0;
-    float v = sin(q.x*3.0 + t) + sin(q.y*3.5 - t*1.3) + sin((q.x+q.y)*2.5 + t*0.7) + sin(length(q)*4.0 - t*2.0);
+    vec2 k = p*3.0;
+    float v = sin(k.x*3.0 + t) + sin(k.y*3.5 - t*1.3) + sin((k.x+k.y)*2.5 + t*0.7) + sin(length(k)*4.0 - t*2.0);
     float n = fbm(p*4.0 + t*0.2);
     float m = 1.0 - smoothstep(W*0.4, W*(1.1 + 0.8*n), e);
     return vec4(pal(v*0.15 + t*0.05), m*A);
@@ -531,39 +539,51 @@ vec4 edgeLayer(vec2 uv){
     float dark = 0.7*(1.0 - smoothstep(0.0, L1, e));
     return vec4(glow, clamp(max(g1, g2) + dark, 0.0, 1.0)*A);
   }
-  if (uEdge == 3) {                       // Lave (blobs)
-    vec2 hb = vec2(0.5*ar, 0.5);
-    float f = 0.0;
-    for (int i = 0; i < 12; i++){
-      float fi = float(i);
-      float a = fi/12.0*6.2831853 + t*0.12*(mod(fi, 2.0)*2.0 - 1.0) + 0.3*sin(t*0.3 + fi);
-      vec2 d = vec2(cos(a), sin(a));
-      float k = min(hb.x/max(abs(d.x), 1e-3), hb.y/max(abs(d.y), 1e-3));
-      vec2 c = d*k*(0.96 + 0.06*sin(t*1.3 + fi*2.0));
-      float r = W*(0.55 + 0.35*sin(t*0.9 + fi*1.7));
-      vec2 q = p - c;
-      f += r*r/(dot(q, q) + 1e-4);
-    }
-    float band = W*0.3/max(e, 0.002);
-    f += band*band;                                       // bordure continue + blobs qui s'en détachent
-    float m = smoothstep(0.85, 1.05, f);
-    vec3 c = mix(vec3(1.0, 0.18, 0.35), vec3(1.0, 0.85, 0.25), smoothstep(1.0, 4.0, f));
-    c = hueRot(c, t*0.15);
-    return vec4(c, m*A);
-  }
-  if (uEdge == 4) {                       // Vagues
+  if (uEdge == 3) {                       // Vagues
     float ee = e + 0.025*sin(ang*6.0 + t*1.5) + 0.015*sin(ang*13.0 - t*2.0);
     float m = 1.0 - smoothstep(W*0.8, W*1.25, ee);
     float band = 0.5 + 0.5*sin(ee*70.0 - t*4.0);
-    vec3 c = pal(ee*3.0 - t*0.3)*(0.45 + 0.65*band);
-    return vec4(c, m*A);
+    return vec4(pal(ee*3.0 - t*0.3)*(0.45 + 0.65*band), m*A);
   }
-  // 5 : Fumée psychédélique
-  vec2 q = p*2.5;
-  vec2 w = vec2(fbm(q + t*0.15), fbm(q + vec2(5.2, 1.3) - t*0.12));
-  float n = fbm(q + 2.0*w + t*0.05);
-  float m = 1.0 - smoothstep(W*0.2, W*(0.8 + 1.4*n), e);
-  return vec4(min(pal(n*1.5 + t*0.07 + w.x)*1.3, 1.0), m*A*0.95);
+  if (uEdge == 4) {                       // Fumée psyché
+    vec2 k = p*2.5;
+    vec2 w = vec2(fbm(k + t*0.15), fbm(k + vec2(5.2, 1.3) - t*0.12));
+    float n = fbm(k + 2.0*w + t*0.05);
+    float m = 1.0 - smoothstep(W*0.2, W*(0.8 + 1.4*n), e);
+    return vec4(min(pal(n*1.5 + t*0.07 + w.x)*1.3, 1.0), m*A*0.95);
+  }
+
+  /* ---------- Sombres (vignettage) ---------- */
+  if (uEdge == 5) {                       // Vignette douce, qui respire lentement
+    float m = 1.0 - smoothstep(-0.05, W*(1.8 + 0.15*sin(t*0.8)), e);
+    return vec4(vec3(0.0), m*m*A);
+  }
+  if (uEdge == 6) {                       // Ombre ondulante
+    float wob = 0.35*W*(sin(ang*6.0 + t*1.2) + 0.5*sin(ang*13.0 - t*1.7));
+    float m = 1.0 - smoothstep(-0.02, W*1.2 + wob, e);
+    return vec4(vec3(0.01, 0.0, 0.03), m*A);
+  }
+  if (uEdge == 7) {                       // Fumée sombre
+    vec2 k = p*2.2;
+    vec2 w = vec2(fbm(k + t*0.12), fbm(k + vec2(3.1, 7.7) - t*0.1));
+    float n = fbm(k + 2.2*w);
+    float m = 1.0 - smoothstep(W*0.1, W*(1.0 + 1.6*n), e);
+    return vec4(pal(n + t*0.03)*0.07, m*A);
+  }
+  if (uEdge == 8) {                       // Encre : vrilles noires qui s'infiltrent
+    vec2 k = p*3.0;
+    vec2 w = vec2(fbm(k*0.8 + t*0.1), fbm(k*0.8 + vec2(9.2, 2.4) - t*0.08));
+    float n = fbm(k + 3.0*w);
+    float reach = (W*2.0 - e)/(W*2.0);                 // 1 au bord, 0 vers l'intérieur
+    float f = n*0.55 + reach*0.62;
+    float ink = smoothstep(0.5, 0.56, f);
+    vec3 c = mix(vec3(0.12, 0.0, 0.18), vec3(0.0), smoothstep(0.56, 0.64, f));   // liseré violet, cœur noir
+    return vec4(c, ink*A);
+  }
+  // 9 : Vignette teintée (sombre, couleur profonde qui tourne)
+  float m = 1.0 - smoothstep(-0.03, W*1.8, e + 0.02*sin(ang*4.0 + t));
+  vec3 c = pal(t*0.05 + ang/6.2831853*0.5)*0.22;
+  return vec4(c, m*mix(0.6, 1.0, m)*A);
 }
 
 void main(){ gl_FragColor = edgeLayer(vUv); }`;
@@ -693,8 +713,10 @@ async function getCamVideo(deviceId){
   return v;
 }
 /* ================= Sources (caméras + vidéos) ================= */
-const EDGE = ['Halo arc-en-ciel', 'Plasma', 'Néon ondulant', 'Lave', 'Vagues', 'Fumée psyché'];
-function setEdge(i){ S.edge = i; [...$('edgeChips').children].forEach(b => b.classList.toggle('on', +b.dataset.i === i)); }
+const EDGE = ['Halo arc-en-ciel', 'Plasma', 'Néon ondulant', 'Vagues', 'Fumée psyché',
+              'Vignette douce', 'Ombre ondulante', 'Fumée sombre', 'Encre', 'Vignette teintée'];
+const EDGE_DARK = 5;   // à partir de cet indice : variantes sombres
+function setEdge(i){ S.edge = i; document.querySelectorAll('.chip.edgefx').forEach(b => b.classList.toggle('on', +b.dataset.i === i)); }
 const TRANS = ['Coupure', 'Fondu', 'Glitch', 'Zoom', 'Volet', 'Flash'];
 function whenReady(el){
   if (el.readyState >= 2) return Promise.resolve();
@@ -1375,7 +1397,7 @@ function setupUi(){
   bindSlider('echoLen', v => (+v).toFixed(2));
   bindSlider('echoThr', v => (+v).toFixed(2));
   $('edgeChips').append(chip('Aucun', 'edgefx', -1, () => setEdge(-1)));
-  EDGE.forEach((n, i) => $('edgeChips').append(chip(n, 'edgefx', i, () => setEdge(i))));
+  EDGE.forEach((n, i) => $(i < EDGE_DARK ? 'edgeChipsC' : 'edgeChipsD').append(chip(n, 'edgefx', i, () => setEdge(i))));
   setEdge(-1);
   bindSlider('edgeAmt', v => (+v).toFixed(2));
   bindSlider('edgeSize', v => (+v).toFixed(2));
