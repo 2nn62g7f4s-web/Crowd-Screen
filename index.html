@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DJ Crowd Screen — prototype v8</title>
+<title>DJ Crowd Screen — prototype v9</title>
 <style>
   :root { --acc:#ff2d75; --bg2:#8b5cf6; --edge:#22c3e6; --panel:#0e0e13; --line:#23232c;
           --fg:#f2f2f5; --mut:#9a9aa8; --field:#1a1a21; }
@@ -222,6 +222,15 @@
         <div class="row"><button id="bMirror">Miroir caméra</button></div>
       </div>
       <div class="card">
+        <h3>Nuée d'étourneaux</h3>
+        <p class="help">Source virtuelle : un ciel gris où vole une nuée qui dessine des formes. À chaque kick, une vague la traverse.</p>
+        <div class="row"><button id="bFlock">🐦 Afficher la nuée</button></div>
+        <div class="grid">
+          <span class="lbl">Oiseaux</span><input id="flockN" type="range" min="500" max="4000" step="100" value="2000"><span class="val" id="flockNV"></span>
+          <span class="lbl">Force de la vague</span><input id="waveAmp" type="range" min="0" max="40" step="1" value="14"><span class="val" id="waveAmpV"></span>
+        </div>
+      </div>
+      <div class="card">
         <h3>Banque de vidéos</h3>
         <p class="help">Les vidéos tournent en boucle, comme une caméra.</p>
         <div class="row">
@@ -271,7 +280,7 @@
           <button id="bAutoCam" class="on">Auto source</button>
           <span class="lbl">tous les</span><input id="camEvery" type="number" min="1" value="32"><span class="lbl">kicks</span>
         </div>
-        <div class="row"><span class="lbl">parmi</span><button id="bUseCams" class="on">Caméras</button><button id="bUseVids" class="on">Vidéos</button></div>
+        <div class="row"><span class="lbl">parmi</span><button id="bUseCams" class="on">Caméras</button><button id="bUseVids" class="on">Vidéos</button><button id="bUseFlock" class="on">Nuée</button></div>
       </div>
     </section>
 
@@ -281,7 +290,7 @@
 
 <div id="start">
   <h1>DJ Crowd Screen</h1>
-  <p>Prototype v8 : bords arrondis et vignettages sombres.</p>
+  <p>Prototype v9 : nuée d’étourneaux comme source vidéo.</p>
   <button id="go">Démarrer</button>
   <p id="err"></p>
 </div>
@@ -304,7 +313,7 @@ const S = {
   curDims: [16, 9], prevDims: [16, 9], curMir: false, prevMir: false,
   echoRainbow: true, clearMot: true, motR: 0,
   edge: -1, edgeT: 0, edgePulse: true, autoEdge: false,
-  tr: 0, trStart: 0, trDur: 0, trChoice: -1, useCams: true, useVids: true, bgTime: 0, clearAcc: true,
+  tr: 0, trStart: 0, trDur: 0, trChoice: -1, useCams: true, useVids: true, useFlock: true, bgTime: 0, clearAcc: true,
 };
 
 /* ================= WebGL ================= */
@@ -717,9 +726,138 @@ const EDGE = ['Halo arc-en-ciel', 'Plasma', 'Néon ondulant', 'Vagues', 'Fumée 
               'Vignette douce', 'Ombre ondulante', 'Fumée sombre', 'Encre', 'Vignette teintée'];
 const EDGE_DARK = 5;   // à partir de cet indice : variantes sombres
 function setEdge(i){ S.edge = i; document.querySelectorAll('.chip.edgefx').forEach(b => b.classList.toggle('on', +b.dataset.i === i)); }
+/* ================= Nuée d'étourneaux (source virtuelle) ================= */
+const FLOCK = (() => {
+  const W = 1280, H = 720, R = 26;
+  const CW = Math.ceil(W/R) + 2, CH = Math.ceil(H/R) + 2;
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#c9ccd1'); sky.addColorStop(1, '#8c9198');
+  let n = 0, px, py, vx, vy, nxt, head = new Int32Array(CW*CH);
+  let t = 0, cxF = W/2, cyF = H/2, ext = 300;
+  const waves = [];
+  const pred = { x: -999, y: -999, vx: 0, vy: 0, on: false, wait: 5 };
+
+  function alloc(count){
+    n = count;
+    px = new Float32Array(n); py = new Float32Array(n); vx = new Float32Array(n); vy = new Float32Array(n);
+    nxt = new Int32Array(n);
+    const a0 = Math.random()*6.28;
+    for (let i = 0; i < n; i++){
+      const r = Math.sqrt(Math.random())*160, a = Math.random()*6.28;
+      px[i] = W/2 + Math.cos(a)*r*1.6; py[i] = H/2 + Math.sin(a)*r*0.7;
+      vx[i] = Math.cos(a0)*3 + (Math.random()-0.5); vy[i] = Math.sin(a0)*3 + (Math.random()-0.5);
+    }
+  }
+  alloc(2000);
+
+  function step(dt){
+    t += dt/60;
+    // point d'attraction qui se promène : la nuée le suit en dessinant des formes
+    const tx = W*0.5 + W*0.3*Math.sin(t*0.21)*Math.cos(t*0.083);
+    const ty = H*0.45 + H*0.22*Math.sin(t*0.27 + 1.3);
+    // prédateur invisible qui traverse de temps en temps et creuse la nuée
+    if (!pred.on){
+      pred.wait -= dt/60;
+      if (pred.wait <= 0){
+        const left = Math.random() < 0.5;
+        pred.x = left ? -120 : W + 120; pred.y = H*(0.15 + Math.random()*0.7);
+        const dx = cxF - pred.x, dy = cyF - pred.y, d = Math.hypot(dx, dy) || 1;
+        pred.vx = dx/d*7; pred.vy = dy/d*7; pred.on = true;
+      }
+    } else {
+      pred.x += pred.vx*dt; pred.y += pred.vy*dt;
+      if (pred.x < -250 || pred.x > W + 250 || pred.y < -250 || pred.y > H + 250){ pred.on = false; pred.wait = 5 + Math.random()*9; }
+    }
+    // grille de voisinage
+    head.fill(-1);
+    for (let i = 0; i < n; i++){
+      const c = (Math.min(CH-1, Math.max(0, (py[i]/R|0) + 1)))*CW + Math.min(CW-1, Math.max(0, (px[i]/R|0) + 1));
+      nxt[i] = head[c]; head[c] = i;
+    }
+    let sx = 0, sy = 0;
+    for (let i = 0; i < n; i++){
+      const x = px[i], y = py[i];
+      const gx = Math.min(CW-2, Math.max(1, (x/R|0) + 1)), gy = Math.min(CH-2, Math.max(1, (y/R|0) + 1));
+      let cnt = 0, mx = 0, my = 0, ax = 0, ay = 0, sepx = 0, sepy = 0, seen = 0;
+      for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++){
+        let j = head[(gy+oy)*CW + gx + ox];
+        while (j !== -1 && seen < 28){
+          if (j !== i){
+            const dx = px[j] - x, dy = py[j] - y, d2 = dx*dx + dy*dy;
+            if (d2 < R*R){
+              seen++; cnt++; mx += px[j]; my += py[j]; ax += vx[j]; ay += vy[j];
+              if (d2 < 42){ sepx -= dx/(d2 + 1); sepy -= dy/(d2 + 1); }
+            }
+          }
+          j = nxt[j];
+        }
+      }
+      let fx = 0, fy = 0;
+      if (cnt){
+        fx += (ax/cnt - vx[i])*0.06 + (mx/cnt - x)*0.0045;  // alignement + cohésion
+        fy += (ay/cnt - vy[i])*0.06 + (my/cnt - y)*0.0045;
+      }
+      fx += sepx*1.4; fy += sepy*1.4;                      // séparation
+      const dxT = tx - x, dyT = ty - y, dT = Math.hypot(dxT, dyT) + 1;
+      fx += dxT/dT*0.035; fy += dyT/dT*0.035;              // attraction
+      if (pred.on){
+        const dx = x - pred.x, dy = y - pred.y, d = Math.hypot(dx, dy) + 1;
+        if (d < 170){ const f = (1 - d/170)*0.7; fx += dx/d*f; fy += dy/d*f; }
+      }
+      if (x < 70) fx += 0.12; else if (x > W - 70) fx -= 0.12;
+      if (y < 60) fy += 0.12; else if (y > H - 60) fy -= 0.12;
+      fx += (Math.random() - 0.5)*0.05; fy += (Math.random() - 0.5)*0.05;
+      let nvx = vx[i] + fx*dt, nvy = vy[i] + fy*dt;
+      const sp = Math.hypot(nvx, nvy) || 1;
+      const cl = Math.min(4.4, Math.max(2.2, sp));
+      vx[i] = nvx/sp*cl; vy[i] = nvy/sp*cl;
+      sx += x; sy += y;
+    }
+    for (let i = 0; i < n; i++){ px[i] += vx[i]*dt; py[i] += vy[i]*dt; }
+    cxF = sx/n; cyF = sy/n;
+    let e = 0; for (let i = 0; i < n; i += 7) e = Math.max(e, Math.abs(px[i] - cxF), Math.abs(py[i] - cyF));
+    ext = e;
+  }
+
+  function draw(now){
+    g.fillStyle = sky; g.fillRect(0, 0, W, H);
+    const amp = +$('waveAmp').value;
+    for (let k = waves.length - 1; k >= 0; k--) if (now - waves[k].t0 > waves[k].dur) waves.splice(k, 1);
+    g.fillStyle = 'rgba(20, 20, 26, 0.85)';
+    for (let i = 0; i < n; i++){
+      let x = px[i], y = py[i], s = 1.9;
+      for (const w of waves){
+        const along = (x - w.cx)*w.c + (y - w.cy)*w.s;
+        const front = -w.ext + (now - w.t0)/w.dur*(2*w.ext);
+        const d = along - front;
+        const env = Math.exp(-(d*d)/(w.width*w.width));
+        if (env > 0.01){
+          const o = amp*env*Math.sin(d*0.09);
+          x += -w.s*o; y += w.c*o;                  // vibration perpendiculaire à la vague
+          s += env*1.6;                             // la bande paraît plus dense
+        }
+      }
+      g.fillRect(x - s/2, y - s/2, s, s);
+    }
+  }
+
+  return {
+    canvas: cv,
+    update(dt, now){ step(Math.min(3, dt/16.7)); draw(now); },
+    kick(){
+      const a = (Math.random() < 0.7 ? 0 : Math.PI/2) + (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5)*0.6;
+      waves.push({ c: Math.cos(a), s: Math.sin(a), cx: cxF, cy: cyF, ext: ext + 60,
+                   width: Math.max(40, ext*0.18), t0: performance.now(), dur: 650 });
+    },
+    setCount(c){ if (c !== n) alloc(c); },
+  };
+})();
+
 const TRANS = ['Coupure', 'Fondu', 'Glitch', 'Zoom', 'Volet', 'Flash'];
 function whenReady(el){
-  if (el.readyState >= 2) return Promise.resolve();
+  if (!(el instanceof HTMLVideoElement) || el.readyState >= 2) return Promise.resolve();
   return new Promise(res => {
     const done = () => res();
     el.addEventListener('loadeddata', done, { once: true });
@@ -728,6 +866,7 @@ function whenReady(el){
 }
 async function sourceEl(src){
   if (src.type === 'cam') return getCamVideo(src.deviceId);
+  if (src.type === 'flock') return src.el;
   await src.el.play().catch(()=>{});
   return src.el;
 }
@@ -762,7 +901,8 @@ async function switchSource(i){
 }
 function nextAutoSource(){
   const ok = S.sources.map((s, i) => i).filter(i => i !== S.srcIdx &&
-    ((S.sources[i].type === 'cam' && S.useCams) || (S.sources[i].type === 'video' && S.useVids)));
+    ((S.sources[i].type === 'cam' && S.useCams) || (S.sources[i].type === 'video' && S.useVids) ||
+     (S.sources[i].type === 'flock' && S.useFlock)));
   return ok.length ? ok[Math.floor(Math.random()*ok.length)] : -1;
 }
 function refreshSources(){
@@ -867,6 +1007,7 @@ function kick(now){
   }
   if (S.autoCam && n % every('camEvery') === 0){ const j = nextAutoSource(); if (j >= 0) switchSource(j); }
   if (S.cats || S.alpacas) spawnCats();
+  if (S.video === FLOCK.canvas) FLOCK.kick();
   const d = $('dot'); d.classList.add('hit'); setTimeout(() => d.classList.remove('hit'), 70);
 }
 function bpm(){
@@ -1199,11 +1340,13 @@ function frame(now){
   // Source courante (unité 0) et précédente pendant une transition (unité 3)
   const trP = S.trDur > 0 ? Math.min(1, (now - S.trStart)/S.trDur) : 1;
   const inTr = trP < 1 && S.tr > 0;
+  if (S.video === FLOCK.canvas || (inTr && S.prevEl === FLOCK.canvas)) FLOCK.update(dt, now);
   const upload = (unit, tex, el) => {
     gl.activeTexture(unit); gl.bindTexture(gl.TEXTURE_2D, tex);
-    if (el && el.readyState >= 2 && el.videoWidth){
+    const isCanvas = el instanceof HTMLCanvasElement;
+    if (el && (isCanvas || (el.readyState >= 2 && el.videoWidth))){
       try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, el); } catch(e){}
-      return [el.videoWidth, el.videoHeight];
+      return isCanvas ? [el.width, el.height] : [el.videoWidth, el.videoHeight];
     }
     return null;
   };
@@ -1426,6 +1569,10 @@ function setupUi(){
   $('bCam').onclick = () => switchSource(S.srcIdx + 1);
   toggleBtn('bUseCams', 'useCams');
   toggleBtn('bUseVids', 'useVids');
+  toggleBtn('bUseFlock', 'useFlock');
+  $('bFlock').onclick = () => switchSource(S.sources.findIndex(x => x.type === 'flock'));
+  bindSlider('flockN', v => v, v => FLOCK.setCount(v|0));
+  bindSlider('waveAmp', v => v);
   $('bAddVid').onclick = () => $('fileVid').click();
   $('fileVid').onchange = e => {
     for (const f of e.target.files) addVideo(URL.createObjectURL(f), f.name, true);
@@ -1491,6 +1638,7 @@ async function start(){
     else { S.sources.push({ type: 'cam', deviceId: firstId || 'cam0', label: '📷 Caméra' }); idx = 0; vids.set(firstId || 'cam0', v); }
   } else vids.set(firstId, v);
   S.srcIdx = idx; S.video = v; S.curMir = true;
+  S.sources.push({ type: 'flock', label: "🐦 Nuée d'étourneaux", el: FLOCK.canvas });
   await loadRepoVideos();
   refreshSources();
 
