@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DJ Crowd Screen — prototype v9</title>
+<title>DJ Crowd Screen — prototype v9.1</title>
 <style>
   :root { --acc:#ff2d75; --bg2:#8b5cf6; --edge:#22c3e6; --panel:#0e0e13; --line:#23232c;
           --fg:#f2f2f5; --mut:#9a9aa8; --field:#1a1a21; }
@@ -728,19 +728,20 @@ const EDGE_DARK = 5;   // à partir de cet indice : variantes sombres
 function setEdge(i){ S.edge = i; document.querySelectorAll('.chip.edgefx').forEach(b => b.classList.toggle('on', +b.dataset.i === i)); }
 /* ================= Nuée d'étourneaux (source virtuelle) ================= */
 const FLOCK = (() => {
-  const W = 1280, H = 720, R = 26;
+  const W = 1280, H = 720, R = 40;
   const CW = Math.ceil(W/R) + 2, CH = Math.ceil(H/R) + 2;
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
   const sky = g.createLinearGradient(0, 0, 0, H);
   sky.addColorStop(0, '#c9ccd1'); sky.addColorStop(1, '#8c9198');
   let n = 0, px, py, vx, vy, nxt, head = new Int32Array(CW*CH);
-  let t = 0, cxF = W/2, cyF = H/2, ext = 300;
+  let t = 0, cxF = W/2, cyF = H/2, ext = 300, spread = 150, RT = 280;
   const waves = [];
   const pred = { x: -999, y: -999, vx: 0, vy: 0, on: false, wait: 5 };
 
   function alloc(count){
     n = count;
+    RT = 90 + Math.sqrt(n)*3;                          // rayon cible : la nuée peut s'étirer jusque-là
     px = new Float32Array(n); py = new Float32Array(n); vx = new Float32Array(n); vy = new Float32Array(n);
     nxt = new Int32Array(n);
     const a0 = Math.random()*6.28;
@@ -756,7 +757,7 @@ const FLOCK = (() => {
     t += dt/60;
     // point d'attraction qui se promène : la nuée le suit en dessinant des formes
     const tx = W*0.5 + W*0.3*Math.sin(t*0.21)*Math.cos(t*0.083);
-    const ty = H*0.45 + H*0.22*Math.sin(t*0.27 + 1.3);
+    const ty = H*0.48 + H*0.16*Math.sin(t*0.27 + 1.3);
     // prédateur invisible qui traverse de temps en temps et creuse la nuée
     if (!pred.on){
       pred.wait -= dt/60;
@@ -783,12 +784,12 @@ const FLOCK = (() => {
       let cnt = 0, mx = 0, my = 0, ax = 0, ay = 0, sepx = 0, sepy = 0, seen = 0;
       for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++){
         let j = head[(gy+oy)*CW + gx + ox];
-        while (j !== -1 && seen < 28){
+        while (j !== -1 && seen < 44){
           if (j !== i){
             const dx = px[j] - x, dy = py[j] - y, d2 = dx*dx + dy*dy;
             if (d2 < R*R){
               seen++; cnt++; mx += px[j]; my += py[j]; ax += vx[j]; ay += vy[j];
-              if (d2 < 42){ sepx -= dx/(d2 + 1); sepy -= dy/(d2 + 1); }
+              if (d2 < 81){ sepx -= dx/(d2 + 1); sepy -= dy/(d2 + 1); }
             }
           }
           j = nxt[j];
@@ -796,19 +797,24 @@ const FLOCK = (() => {
       }
       let fx = 0, fy = 0;
       if (cnt){
-        fx += (ax/cnt - vx[i])*0.06 + (mx/cnt - x)*0.0045;  // alignement + cohésion
-        fy += (ay/cnt - vy[i])*0.06 + (my/cnt - y)*0.0045;
+        fx += (ax/cnt - vx[i])*0.06 + (mx/cnt - x)*0.002;  // alignement + cohésion
+        fy += (ay/cnt - vy[i])*0.06 + (my/cnt - y)*0.002;
       }
       fx += sepx*1.4; fy += sepy*1.4;                      // séparation
+      // cohésion globale : rappel vers le centre de la nuée, plus fort pour les oiseaux éloignés ou isolés
+      const dxC = cxF - x, dyC = cyF - y, dC = Math.hypot(dxC, dyC) + 1;
+      const over = Math.max(0, dC - RT)/RT;                // 0 tant que l'oiseau reste dans le rayon cible
+      const pull = 0.02 + 0.07*Math.min(1, over*over*4) + (cnt < 6 ? 0.14 : 0);   // isolés : retour rapide
+      fx += dxC/dC*pull; fy += dyC/dC*pull;
       const dxT = tx - x, dyT = ty - y, dT = Math.hypot(dxT, dyT) + 1;
       fx += dxT/dT*0.035; fy += dyT/dT*0.035;              // attraction
       if (pred.on){
         const dx = x - pred.x, dy = y - pred.y, d = Math.hypot(dx, dy) + 1;
-        if (d < 170){ const f = (1 - d/170)*0.7; fx += dx/d*f; fy += dy/d*f; }
+        if (d < 120){ const f = (1 - d/120)*0.35; fx += dx/d*f; fy += dy/d*f; }   // creuse sans couper
       }
-      if (x < 70) fx += 0.12; else if (x > W - 70) fx -= 0.12;
-      if (y < 60) fy += 0.12; else if (y > H - 60) fy -= 0.12;
-      fx += (Math.random() - 0.5)*0.05; fy += (Math.random() - 0.5)*0.05;
+      if (x < 100) fx += 0.15; else if (x > W - 100) fx -= 0.15;   // reste dans le cadre, même rogné
+      if (y < 120) fy += 0.15; else if (y > H - 120) fy -= 0.15;
+      fx += (Math.random() - 0.5)*0.03; fy += (Math.random() - 0.5)*0.03;
       let nvx = vx[i] + fx*dt, nvy = vy[i] + fy*dt;
       const sp = Math.hypot(nvx, nvy) || 1;
       const cl = Math.min(4.4, Math.max(2.2, sp));
@@ -817,8 +823,12 @@ const FLOCK = (() => {
     }
     for (let i = 0; i < n; i++){ px[i] += vx[i]*dt; py[i] += vy[i]*dt; }
     cxF = sx/n; cyF = sy/n;
-    let e = 0; for (let i = 0; i < n; i += 7) e = Math.max(e, Math.abs(px[i] - cxF), Math.abs(py[i] - cyF));
-    ext = e;
+    let e = 0, md = 0, mc = 0;
+    for (let i = 0; i < n; i += 7){
+      e = Math.max(e, Math.abs(px[i] - cxF), Math.abs(py[i] - cyF));
+      md += Math.hypot(px[i] - cxF, py[i] - cyF); mc++;
+    }
+    ext = e; spread = md/mc;
   }
 
   function draw(now){
