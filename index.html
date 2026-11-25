@@ -223,7 +223,7 @@
       </div>
       <div class="card">
         <h3>Nuée d'étourneaux</h3>
-        <p class="help">Source virtuelle : un ciel gris où vole une nuée qui dessine des formes. À chaque kick, une vague la traverse.</p>
+        <p class="help">Source virtuelle : un fond noir où vole une nuée blanche qui dessine des formes. À chaque kick, une vague la traverse.</p>
         <div class="row"><button id="bFlock">🐦 Afficher la nuée</button></div>
         <div class="grid">
           <span class="lbl">Oiseaux</span><input id="flockN" type="range" min="500" max="4000" step="100" value="2000"><span class="val" id="flockNV"></span>
@@ -735,7 +735,7 @@ const FLOCK = (() => {
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
   const sky = g.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, '#c9ccd1'); sky.addColorStop(1, '#8c9198');
+  sky.addColorStop(0, '#000'); sky.addColorStop(1, '#000');      // fond noir uni
   let n = 0, px, py, vx, vy, nxt, head = new Int32Array(CW*CH);
   let t = 0, cxF = W/2, cyF = H/2, ext = 300, spread = 150, RT = 280;
   const waves = [];
@@ -840,7 +840,7 @@ const FLOCK = (() => {
     g.fillStyle = sky; g.fillRect(0, 0, W, H);
     const amp = +$('waveAmp').value, size = +$('birdSize').value;
     for (let k = waves.length - 1; k >= 0; k--) if (now - waves[k].t0 > waves[k].dur) waves.splice(k, 1);
-    g.fillStyle = 'rgba(20, 20, 26, 0.85)';
+    g.fillStyle = 'rgba(240, 242, 248, 0.9)';     // oiseaux blancs
     g.beginPath();                                 // un seul tracé pour tous les oiseaux (rapide)
     for (let i = 0; i < n; i++){
       let x = px[i], y = py[i], s = 1.9*size;
