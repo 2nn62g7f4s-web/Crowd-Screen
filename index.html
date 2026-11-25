@@ -73,8 +73,11 @@
   [data-mode][hidden] { display:none; }
 
   /* ---- Divers ---- */
-  #showUi { position:absolute; right:10px; bottom:10px; z-index:4; opacity:.3; }
-  #showUi:hover { opacity:1; }
+  #projBtns { position:absolute; right:10px; bottom:10px; z-index:4; display:flex; gap:8px; }
+  #projBtns[hidden] { display:none; }
+  #projBtns button { opacity:.3; transition:opacity .2s; }
+  #projBtns button:hover, #projBtns button.done { opacity:1; }
+  #projBtns button.done { background:var(--acc); border-color:var(--acc); }
   #start { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center;
     justify-content:center; gap:14px; text-align:center; padding:24px; background:#08080b; z-index:10; }
   #start h1 { margin:0; font-size:28px; letter-spacing:.04em; }
@@ -114,7 +117,10 @@
   <div id="stage">
     <canvas id="gl"></canvas>
     <canvas id="fx2d"></canvas>
-    <button id="showUi" hidden>⚙︎ Réglages</button>
+    <div id="projBtns" hidden>
+      <button id="bFavProj" title="Enregistrer les réglages actuels en favori (touche S)">★ Favori</button>
+      <button id="showUi">⚙︎ Réglages</button>
+    </div>
   </div>
 
   <aside id="ui" hidden>
@@ -1638,7 +1644,10 @@ function addPreset(name){
     name: name || 'Favori ' + (presets.length + 1), rot: true });
   presets.push(p); savePresets();
   S.curPreset = p.id; renderPresets();
-  const b = $('bFav'); b.textContent = '✓ Enregistré'; setTimeout(() => b.textContent = '★ Favori', 1200);
+  for (const b of [$('bFav'), $('bFavProj')]){
+    b.textContent = '✓ ' + p.name; b.classList.add('done');
+    clearTimeout(b._t); b._t = setTimeout(() => { b.textContent = '★ Favori'; b.classList.remove('done'); }, 1500);
+  }
 }
 function applyPreset(p){
   if (p.src){ const i = S.sources.findIndex(s => srcKey(s) === p.src.key); if (i >= 0) switchSource(i); }
@@ -1703,7 +1712,7 @@ function renderPresets(){
 /* ================= Interface ================= */
 function toggleUi(force){
   const hide = force !== undefined ? force : !$('ui').hidden;
-  $('ui').hidden = hide; $('showUi').hidden = !hide;
+  $('ui').hidden = hide; $('projBtns').hidden = !hide;
 }
 async function fullscreen(){
   try {
@@ -1791,6 +1800,7 @@ function setupUi(){
   // Favoris
   toggleBtn('bFavSrc', 'favSrc');
   $('bFav').onclick = () => addPreset('');
+  $('bFavProj').onclick = () => addPreset('');
   $('bFavSave').onclick = () => { addPreset($('favName').value.trim()); $('favName').value = ''; };
   $('bPresetRot').onclick = () => {
     S.presetRot = !S.presetRot;
