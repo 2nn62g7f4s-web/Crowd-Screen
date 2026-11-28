@@ -263,13 +263,12 @@
       </div>
       <div class="card">
         <h3>Nuée d'étourneaux</h3>
-        <p class="help">Source virtuelle : un fond noir où vole une nuée blanche qui dessine des formes. À chaque kick, une vague la traverse.</p>
+        <p class="help">Source virtuelle : un fond noir où vole une nuée qui dessine des formes et réagit au kick. Les presets se règlent dans le <a href="lab-nuee.html" style="color:var(--acc)">labo de la nuée</a> ; taille et vitesse ci-dessous s'appliquent en plus du preset.</p>
         <div class="row"><button id="bFlock">🐦 Afficher la nuée</button></div>
+        <div class="row"><span class="lbl">Preset</span><select id="selFlock"></select><button id="bFlockPaste">Coller du labo</button><button id="bFlockDel" hidden>✕</button></div>
         <div class="grid">
-          <span class="lbl">Oiseaux</span><input id="flockN" type="range" min="500" max="4000" step="100" value="2000"><span class="val" id="flockNV"></span>
-          <span class="lbl">Taille des oiseaux</span><input id="birdSize" type="range" min="0.5" max="4" step="0.1" value="2"><span class="val" id="birdSizeV"></span>
-          <span class="lbl">Vitesse</span><input id="flockSpeed" type="range" min="0.2" max="2.5" step="0.05" value="1"><span class="val" id="flockSpeedV"></span>
-          <span class="lbl">Force de la vague</span><input id="waveAmp" type="range" min="0" max="40" step="1" value="14"><span class="val" id="waveAmpV"></span>
+          <span class="lbl">Taille des oiseaux</span><input id="birdSize" type="range" min="0.3" max="2.5" step="0.05" value="1"><span class="val" id="birdSizeV"></span>
+          <span class="lbl">Vitesse</span><input id="flockSpeed" type="range" min="0.3" max="2.5" step="0.05" value="1"><span class="val" id="flockSpeedV"></span>
         </div>
       </div>
       <div class="card">
@@ -369,6 +368,7 @@
   <p id="err"></p>
 </div>
 
+<script src="flock.js"></script>
 <script>
 (() => {
 'use strict';
@@ -801,163 +801,32 @@ const EDGE = ['Halo arc-en-ciel', 'Plasma', 'Néon ondulant', 'Vagues', 'Fumée 
 const EDGE_DARK = 5;   // à partir de cet indice : variantes sombres
 function setEdge(i){ S.edge = i; document.querySelectorAll('.chip.edgefx').forEach(b => b.classList.toggle('on', +b.dataset.i === i)); }
 /* ================= Nuée d'étourneaux (source virtuelle) ================= */
-const FLOCK = (() => {
-  const W = 1280, H = 720, R = 40;
-  const CW = Math.ceil(W/R) + 2, CH = Math.ceil(H/R) + 2;
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const g = cv.getContext('2d');
-  const sky = g.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, '#000'); sky.addColorStop(1, '#000');      // fond noir uni
-  let n = 0, px, py, vx, vy, nxt, head = new Int32Array(CW*CH);
-  let t = 0, cxF = W/2, cyF = H/2, ext = 300, spread = 150, RT = 280, spin = 0;
-  const waves = [];
-  const pred = { x: -999, y: -999, vx: 0, vy: 0, on: false, wait: 5 };
-
-  function alloc(count){
-    n = count;
-    RT = 90 + Math.sqrt(n)*3;                          // rayon cible : la nuée peut s'étirer jusque-là
-    px = new Float32Array(n); py = new Float32Array(n); vx = new Float32Array(n); vy = new Float32Array(n);
-    nxt = new Int32Array(n);
-    const a0 = Math.random()*6.28;
-    for (let i = 0; i < n; i++){
-      const r = Math.sqrt(Math.random())*160, a = Math.random()*6.28;
-      px[i] = W/2 + Math.cos(a)*r*1.6; py[i] = H/2 + Math.sin(a)*r*0.7;
-      vx[i] = Math.cos(a0)*3 + (Math.random()-0.5); vy[i] = Math.sin(a0)*3 + (Math.random()-0.5);
-    }
-  }
-  alloc(2000);
-
-  function step(dt){
-    t += dt/60;
-    // point d'attraction qui se promène : la nuée le suit en dessinant des formes
-    const tx = W*0.5 + W*0.13*Math.sin(t*0.21)*Math.cos(t*0.083);   // promenade resserrée autour du centre
-    const ty = H*0.5 + H*0.07*Math.sin(t*0.27 + 1.3);
-    // prédateur invisible qui traverse de temps en temps et creuse la nuée
-    if (!pred.on){
-      pred.wait -= dt/60;
-      if (pred.wait <= 0){
-        const left = Math.random() < 0.5;
-        pred.x = left ? -120 : W + 120; pred.y = H*(0.15 + Math.random()*0.7);
-        const dx = cxF - pred.x, dy = cyF - pred.y, d = Math.hypot(dx, dy) || 1;
-        pred.vx = dx/d*7; pred.vy = dy/d*7; pred.on = true;
-      }
-    } else {
-      pred.x += pred.vx*dt; pred.y += pred.vy*dt;
-      if (pred.x < -250 || pred.x > W + 250 || pred.y < -250 || pred.y > H + 250){ pred.on = false; pred.wait = 5 + Math.random()*9; }
-    }
-    // grille de voisinage
-    head.fill(-1);
-    for (let i = 0; i < n; i++){
-      const c = (Math.min(CH-1, Math.max(0, (py[i]/R|0) + 1)))*CW + Math.min(CW-1, Math.max(0, (px[i]/R|0) + 1));
-      nxt[i] = head[c]; head[c] = i;
-    }
-    let sx = 0, sy = 0;
-    const ocx = (cxF - W/2)/(W/2), ocy = (cyF - H/2)/(H/2);          // décalage de la nuée (-1..1)
-    const gcx = -Math.sign(ocx)*ocx*ocx*0.2, gcy = -Math.sign(ocy)*ocy*ocy*0.2;
-    for (let i = 0; i < n; i++){
-      const x = px[i], y = py[i];
-      const gx = Math.min(CW-2, Math.max(1, (x/R|0) + 1)), gy = Math.min(CH-2, Math.max(1, (y/R|0) + 1));
-      let cnt = 0, mx = 0, my = 0, ax = 0, ay = 0, sepx = 0, sepy = 0, seen = 0;
-      for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++){
-        let j = head[(gy+oy)*CW + gx + ox];
-        while (j !== -1 && seen < 44){
-          if (j !== i){
-            const dx = px[j] - x, dy = py[j] - y, d2 = dx*dx + dy*dy;
-            if (d2 < R*R){
-              seen++; cnt++; mx += px[j]; my += py[j]; ax += vx[j]; ay += vy[j];
-              if (d2 < 81){ sepx -= dx/(d2 + 1); sepy -= dy/(d2 + 1); }
-            }
-          }
-          j = nxt[j];
-        }
-      }
-      let fx = 0, fy = 0;
-      if (cnt){
-        fx += (ax/cnt - vx[i])*0.06 + (mx/cnt - x)*0.002;  // alignement + cohésion
-        fy += (ay/cnt - vy[i])*0.06 + (my/cnt - y)*0.002;
-      }
-      fx += sepx*1.4; fy += sepy*1.4;                      // séparation
-      // cohésion globale : rappel vers le centre de la nuée, plus fort pour les oiseaux éloignés ou isolés
-      const dxC = cxF - x, dyC = cyF - y, dC = Math.hypot(dxC, dyC) + 1;
-      const over = Math.max(0, dC - RT)/RT;                // 0 tant que l'oiseau reste dans le rayon cible
-      const pull = 0.02 + 0.07*Math.min(1, over*over*4) + (cnt < 6 ? 0.14 : 0);   // isolés : retour rapide
-      fx += dxC/dC*pull; fy += dyC/dC*pull;
-      const dxT = tx - x, dyT = ty - y, dT = Math.hypot(dxT, dyT) + 1;
-      fx += dxT/dT*0.05; fy += dyT/dT*0.05;                // attraction
-      fx += gcx; fy += gcy;                                // la nuée entière est ramenée vers le centre de l'écran
-      { const rx = x - cxF, ry = y - cyF, rr = Math.hypot(rx, ry) + 1;
-        fx += spin*0.04*ry/rr; fy -= spin*0.04*rx/rr; }       // frein anti-tourbillon
-      if (pred.on){
-        const dx = x - pred.x, dy = y - pred.y, d = Math.hypot(dx, dy) + 1;
-        if (d < 120){ const f = (1 - d/120)*0.35; fx += dx/d*f; fy += dy/d*f; }   // creuse sans couper
-      }
-      if (x < 100) fx += 0.15; else if (x > W - 100) fx -= 0.15;   // reste dans le cadre, même rogné
-      if (y < 120) fy += 0.15; else if (y > H - 120) fy -= 0.15;
-      fx += (Math.random() - 0.5)*0.03; fy += (Math.random() - 0.5)*0.03;
-      let nvx = vx[i] + fx*dt, nvy = vy[i] + fy*dt;
-      const sp = Math.hypot(nvx, nvy) || 1;
-      const cl = Math.min(4.4, Math.max(2.2, sp));
-      vx[i] = nvx/sp*cl; vy[i] = nvy/sp*cl;
-      sx += x; sy += y;
-    }
-    for (let i = 0; i < n; i++){ px[i] += vx[i]*dt; py[i] += vy[i]*dt; }
-    { let L = 0, mvx = 0, mvy = 0, c = 0;
-      for (let i = 0; i < n; i += 3){ mvx += vx[i]; mvy += vy[i]; c++; }
-      mvx /= c; mvy /= c;
-      for (let i = 0; i < n; i += 3){
-        const rx = px[i] - cxF, ry = py[i] - cyF, ux = vx[i] - mvx, uy = vy[i] - mvy;
-        L += (rx*uy - ry*ux)/((Math.hypot(rx, ry) + 1)*(Math.hypot(ux, uy) + 0.1));
-      }
-      spin = L/c; }
-    cxF = sx/n; cyF = sy/n;
-    let e = 0, md = 0, mc = 0;
-    for (let i = 0; i < n; i += 7){
-      e = Math.max(e, Math.abs(px[i] - cxF), Math.abs(py[i] - cyF));
-      md += Math.hypot(px[i] - cxF, py[i] - cyF); mc++;
-    }
-    ext = e; spread = md/mc;
-  }
-
-  function draw(now){
-    g.fillStyle = sky; g.fillRect(0, 0, W, H);
-    const amp = +$('waveAmp').value, size = +$('birdSize').value;
-    for (let k = waves.length - 1; k >= 0; k--) if (now - waves[k].t0 > waves[k].dur) waves.splice(k, 1);
-    g.fillStyle = 'rgba(240, 242, 248, 0.9)';     // oiseaux blancs
-    g.beginPath();                                 // un seul tracé pour tous les oiseaux (rapide)
-    for (let i = 0; i < n; i++){
-      let x = px[i], y = py[i], s = 1.9*size;
-      for (const w of waves){
-        const along = (x - w.cx)*w.c + (y - w.cy)*w.s;
-        const front = -w.ext + (now - w.t0)/w.dur*(2*w.ext);
-        const d = along - front;
-        const env = Math.exp(-(d*d)/(w.width*w.width));
-        if (env > 0.01){
-          const o = amp*env*Math.sin(d*0.09);
-          x += -w.s*o; y += w.c*o;                  // vibration perpendiculaire à la vague
-          s += env*1.6*size;                        // la bande paraît plus dense
-        }
-      }
-      const r = s*0.6;
-      g.moveTo(x + r, y); g.arc(x, y, r, 0, 6.2832);
-    }
-    g.fill();
-  }
-
-  return {
-    canvas: cv,
-    update(dt, now){
-      let d = Math.min(3, dt/16.7) * +$('flockSpeed').value;
-      while (d > 0){ const k = Math.min(1.5, d); step(k); d -= k; }   // sous-pas : stable même en accéléré
-      draw(now);
-    },
-    kick(){
-      const a = (Math.random() < 0.7 ? 0 : Math.PI/2) + (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5)*0.6;
-      waves.push({ c: Math.cos(a), s: Math.sin(a), cx: cxF, cy: cyF, ext: ext + 60,
-                   width: Math.max(40, ext*0.18), t0: performance.now(), dur: 650 });
-    },
-    setCount(c){ if (c !== n) alloc(c); },
-  };
-})();
+/* Nuée : simulation partagée avec le labo (flock.js) */
+const FLOCK = makeFlock();
+const FLOCK_BUILTIN = [
+  {"effet":"nuee","v":1,"nom":"Preset 1","reglages":{"waveDir":4,"waveAmp":33,"waveDur":320,"waveWidth":0.29,"waveRipple":0.025,"waveDense":1.2,"kickScatter":0.65,"kickBoost":0,"kickFlash":0.65,"count":3100,"speed":1.65,"minSpeed":2.7,"maxSpeed":4.4,"jitter":0.09,"perception":19,"maxNeighbors":39,"align":0.3,"cohesion":0.009,"separation":1.6,"sepDist":11.5,"spread":0.9,"pullBase":0.022,"pullFar":0.07,"pullLone":0.14,"loneCount":6,"antiSpin":0.104,"attract":0.136,"wanderX":0.13,"wanderY":0.175,"wanderSpeed":3.05,"recenter":0.2,"edgeMargin":100,"edgeForce":0.15,"predOn":1,"predEvery":5.5,"predRand":6,"predSpeed":4.5,"predRadius":290,"predForce":1.18,"birdSize":2.9,"opacity":0.86,"stretch":0.8,"trail":0.42,"color":"#ffffff","bg":"#000000"}},
+  {"effet":"nuee","v":1,"nom":"Nuée d'origine","reglages":{}},
+];
+let flockUser = loadJSON('dcs-flock-presets', []);
+const flockAll = () => FLOCK_BUILTIN.concat(flockUser);
+function applyFlock(){
+  const p = flockAll()[S.flockPreset || 0] || FLOCK_BUILTIN[0];
+  const r = Object.assign({}, FLOCK_DEF, p.reglages);
+  r.birdSize *= +$('birdSize').value; r.speed *= +$('flockSpeed').value;
+  FLOCK.set(r);
+}
+function setFlockPreset(i){
+  const all = flockAll();
+  S.flockPreset = Math.max(0, Math.min(all.length - 1, i|0));
+  try { localStorage.setItem('dcs-flock-cur', String(S.flockPreset)); } catch(e){}
+  applyFlock(); refreshFlockList();
+}
+function refreshFlockList(){
+  const sel = $('selFlock'); sel.innerHTML = '';
+  flockAll().forEach((p, i) => sel.add(new Option(p.nom + (i >= FLOCK_BUILTIN.length ? ' (collé)' : ''), String(i))));
+  sel.value = String(S.flockPreset || 0);
+  $('bFlockDel').hidden = (S.flockPreset || 0) < FLOCK_BUILTIN.length;
+}
 
 /* ================= Boule de fumée (source virtuelle, mise au point dans lab.html) ================= */
 const SMOKE_DEF = {"inflate":0.35,"attack":15,"release":260,"springFreq":4,"springDamp":0.45,"squash":0.12,"kickTurb":0.5,"kickFlow":2.5,"flash":0.4,
@@ -1877,7 +1746,7 @@ function frame(now){
 }
 
 /* ================= Favoris ================= */
-const P_SLIDERS = ['amt', 'dur', 'bgAmt', 'bgSpeed', 'echoLen', 'echoThr', 'edgeAmt', 'edgeSize', 'edgeSpeed', 'smokeSize'];
+const P_SLIDERS = ['amt', 'dur', 'bgAmt', 'bgSpeed', 'echoLen', 'echoThr', 'edgeAmt', 'edgeSize', 'edgeSpeed', 'smokeSize', 'birdSize', 'flockSpeed'];
 const P_TOGGLES = { echoRainbow: 'bEchoRainbow', edgePulse: 'bEdgePulse', cats: 'bCats', alpacas: 'bAlp' };
 let presets = loadJSON('dcs-presets', []);
 const savePresets = () => saveJSON('dcs-presets', presets);
@@ -1886,7 +1755,7 @@ function snapshot(){
   const cur = S.sources[S.srcIdx];
   const p = { src: S.favSrc && cur ? { key: srcKey(cur), label: cur.label } : null,
     kick: [...S.kfx].sort(), bg: [...S.bg].sort((a, b) => a - b), edge: S.edge, set: {}, tog: {},
-    smoke: smokeAll()[S.smokePreset || 0]?.nom };
+    smoke: smokeAll()[S.smokePreset || 0]?.nom, flock: flockAll()[S.flockPreset || 0]?.nom };
   P_SLIDERS.forEach(id => p.set[id] = +$(id).value);
   for (const k in P_TOGGLES) p.tog[k] = !!S[k];
   return p;
@@ -1904,6 +1773,7 @@ function addPreset(name){
 }
 function applyPreset(p){
   if (p.src){ const i = S.sources.findIndex(s => srcKey(s) === p.src.key); if (i >= 0) switchSource(i); }
+  if (p.flock){ const j = flockAll().findIndex(x => x.nom === p.flock); if (j >= 0) setFlockPreset(j); }
   if (p.smoke){ const j = smokeAll().findIndex(x => x.nom === p.smoke); if (j >= 0){ setSmokePreset(j); refreshSmokeList(); } }
   S.kfx = new Set(p.kick.filter(i => i < KICK.length)); refreshKick();
   setBg(new Set(p.bg.filter(i => BG[i])));
@@ -2089,10 +1959,27 @@ function setupUi(){
     smokeUser.splice(i, 1); saveJSON('dcs-smoke-presets', smokeUser);
     setSmokePreset(0); refreshSmokeList();
   };
-  bindSlider('flockN', v => v, v => FLOCK.setCount(v|0));
-  bindSlider('waveAmp', v => v);
-  bindSlider('birdSize', v => '×' + (+v).toFixed(1));
-  bindSlider('flockSpeed', v => '×' + (+v).toFixed(2));
+  bindSlider('birdSize', v => '×' + (+v).toFixed(2), () => applyFlock());
+  bindSlider('flockSpeed', v => '×' + (+v).toFixed(2), () => applyFlock());
+  setFlockPreset(+(localStorage.getItem('dcs-flock-cur') || 0));
+  $('selFlock').onchange = e => setFlockPreset(+e.target.value);
+  $('bFlockPaste').onclick = () => {
+    const txt = prompt('Colle ici les réglages copiés dans le labo de la nuée :', '');
+    if (!txt) return;
+    try {
+      const i = txt.indexOf('{'), j = txt.lastIndexOf('}');
+      const o = JSON.parse(txt.slice(i, j + 1));
+      if (!o.reglages || (o.effet && o.effet !== 'nuee')) throw new Error('ce ne sont pas des réglages de nuée');
+      o.nom = o.nom || 'Preset collé';
+      flockUser = flockUser.filter(p => p.nom !== o.nom); flockUser.push(o); saveJSON('dcs-flock-presets', flockUser);
+      setFlockPreset(flockAll().indexOf(o));
+    } catch(e){ alert('Réglages illisibles : ' + e.message); }
+  };
+  $('bFlockDel').onclick = () => {
+    const i = S.flockPreset - FLOCK_BUILTIN.length; if (i < 0) return;
+    if (!confirm('Supprimer « ' + flockUser[i].nom + ' » ?')) return;
+    flockUser.splice(i, 1); saveJSON('dcs-flock-presets', flockUser); setFlockPreset(0);
+  };
   $('bAddVid').onclick = () => $('fileVid').click();
   $('fileVid').onchange = e => {
     for (const f of e.target.files) addVideo(URL.createObjectURL(f), f.name, true);
