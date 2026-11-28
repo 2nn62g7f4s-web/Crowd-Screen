@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Labo — Tunnel infini</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#000;color:#ddd;font:14px/1.3 -apple-system,system-ui,sans-serif}
+  #stage{position:sticky;top:0;height:52vh;background:#000;z-index:2}
+  #cv{width:100%;height:100%;display:block}
+  #kd{position:absolute;top:10px;right:10px;width:14px;height:14px;border-radius:50%;background:#333;transition:background .08s}
+  #kd.on{background:#ff3b6b;box-shadow:0 0 12px #ff3b6b}
+  #msg{position:absolute;left:10px;top:8px;font-size:12px;opacity:.7}
+  body.full #stage{position:fixed;inset:0;height:100%}
+  body.full #panel{display:none}
+  #panel{padding:10px 12px 40px}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+  button,select{background:#1d1d24;color:#eee;border:1px solid #333;border-radius:8px;padding:8px 10px;font:inherit}
+  button.on{background:#3a1d5c;border-color:#7b4bd1}
+  select{flex:1;min-width:140px}
+  h3{margin:16px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#9a8cff}
+  h3 small{color:#777;text-transform:none;letter-spacing:0}
+  .s{display:grid;grid-template-columns:110px 1fr 46px;align-items:center;gap:8px;margin:4px 0}
+  .s input{width:100%}
+  .s output{text-align:right;font-variant-numeric:tabular-nums;color:#aaa;font-size:12px}
+  textarea{width:100%;height:70px;background:#111;color:#ddd;border:1px solid #333;border-radius:8px;font:12px monospace}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas><div id="kd"></div><div id="msg"></div></div>
+<div id="panel">
+  <div class="row">
+    <button id="bMic">🎤 Micro</button>
+    <button id="bAuto">🥁 Kick auto</button>
+    <button id="bTap">👆 Kick</button>
+    <button id="bFull">⛶ Plein écran</button>
+  </div>
+  <div class="row">
+    <select id="selP"></select>
+    <button id="bSave">💾 Enregistrer</button>
+    <button id="bDel">🗑</button>
+  </div>
+  <div class="row">
+    <button id="bCopy">📋 Copier les réglages</button>
+    <button id="bReset">↺ Défaut</button>
+  </div>
+  <div id="ctl"></div>
+  <h3>Charger un JSON</h3>
+  <textarea id="ta" placeholder='{"effet":"tunnel","v":1,"nom":"…","reglages":{…}}'></textarea>
+  <div class="row"><button id="bLoad">Charger</button></div>
+</div>
+<script src="tunnel.js"></script>
+<script>
+const EFFET = "tunnel", KEY = "dcs-tunnel-presets", DKEY = "dcs-tunnel-lab-det";
+const SCHEMA = [
+  ["Forme"],
+  ["cotes","Côtés (0=cercle)",0,8,1],["couches","Couches",4,32,1],["epaisseur","Épaisseur",0.005,0.2,0.005],
+  ["remplissage","Remplissage",0,1,0.05],["kaleido","Kaléidoscope",0,12,1],["fondTunnel","Tunnel de fond",0,1,0.05],["rayures","Rayures fond",2,24,1],
+  ["Mouvement"],
+  ["vitesse","Vitesse",0,5,0.05],["torsion","Torsion",-0.6,0.6,0.01],["rotation","Rotation",-1,1,0.01],
+  ["ondulation","Ondulation",0,1.5,0.05],["derive","Dérive centre",0,1.5,0.05],["brouillard","Brouillard",0,2,0.05],
+  ["Couleurs"],
+  ["teinte","Teinte",0,1,0.01],["vitesseTeinte","Défilement teinte",0,0.3,0.005],["ecartTeinte","Écart teinte",0,0.5,0.005],
+  ["saturation","Saturation",0,1,0.05],["lueur","Lueur",0,2,0.05],
+  ["Kick"],
+  ["kickVitesse","Accélération",0,8,0.1],["kickDuree","Retombée (s)",0.05,1.5,0.05],["kickZoom","Zoom",0,1,0.05],
+  ["kickFlash","Flash",0,1,0.05],["kickTeinte","Saut couleur",0,0.5,0.01],["kickEpaisseur","Gonflement trait",0,3,0.1],
+];
+const DSCHEMA = [
+  ["sens","Sensibilité",1.1,3,0.05],["gap","Écart min (ms)",100,600,10],["freq","Passe-bas (Hz)",60,400,5],
+  ["bpm","BPM kick auto",60,180,1],["res","Résolution max",0.5,3,0.25],
+];
+let R = {...TUNNEL_DEF};
+let D = {sens:1.5,gap:250,freq:150,bpm:126,res:1.5};
+try{ Object.assign(D, JSON.parse(localStorage.getItem(DKEY)||"{}")); }catch(e){}
+
+const cv = document.getElementById("cv");
+const fx = makeTunnel(cv, R); fx.resize(D.res);
+const inputs = {};
+
+function slider(host, [k,label,min,max,step], obj, onChange){
+  const d = document.createElement("div"); d.className="s";
+  d.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><output></output>`;
+  const i = d.querySelector("input"), o = d.querySelector("output");
+  const show = () => o.textContent = (+obj[k]).toFixed(step<1 ? (step<0.01?3:2) : 0);
+  i.value = obj[k]; show();
+  i.oninput = () => { obj[k] = +i.value; show(); onChange(); };
+  host.appendChild(d); return {i, show};
+}
+const ctl = document.getElementById("ctl");
+for (const s of SCHEMA){
+  if (s.length===1){ const h=document.createElement("h3"); h.textContent=s[0]; ctl.appendChild(h); continue; }
+  inputs[s[0]] = slider(ctl, s, R, () => fx.set(R));
+}
+{ const h=document.createElement("h3"); h.innerHTML="Détection <small>(non exportée)</small>"; ctl.appendChild(h);
+  for (const s of DSCHEMA) slider(ctl, s, D, () => { localStorage.setItem(DKEY, JSON.stringify(D)); if(lp) lp.frequency.value=D.freq; fx.resize(D.res); }); }
+
+function apply(r){ R = {...TUNNEL_DEF, ...r}; fx.set(R); for (const k in inputs){ inputs[k].i.value = R[k]; inputs[k].show(); } }
+
+// --- Presets ---
+const selP = document.getElementById("selP");
+const user = () => { try{ return JSON.parse(localStorage.getItem(KEY)||"[]"); }catch(e){ return []; } };
+function fillSel(pick){
+  selP.innerHTML = "";
+  TUNNEL_BUILTIN.forEach((p,i)=> selP.add(new Option("★ "+p.nom, "b"+i)));
+  user().forEach((p,i)=> selP.add(new Option(p.nom, "u"+i)));
+  if (pick) selP.value = pick;
+}
+selP.onchange = () => { const v=selP.value, i=+v.slice(1); apply(v[0]==="b" ? TUNNEL_BUILTIN[i].reglages : user()[i].reglages); };
+document.getElementById("bSave").onclick = () => {
+  const nom = prompt("Nom du preset ?", "Mon tunnel"); if(!nom) return;
+  const u = user().filter(p=>p.nom!==nom); u.push({nom, reglages:{...R}});
+  localStorage.setItem(KEY, JSON.stringify(u)); fillSel("u"+(u.length-1));
+};
+document.getElementById("bDel").onclick = () => {
+  const v=selP.value; if(v[0]!=="u") return flash("Preset intégré : non supprimable");
+  const u=user(); u.splice(+v.slice(1),1); localStorage.setItem(KEY, JSON.stringify(u)); fillSel("b0"); apply(TUNNEL_BUILTIN[0].reglages);
+};
+document.getElementById("bReset").onclick = () => { apply(TUNNEL_DEF); fillSel("b0"); };
+document.getElementById("bCopy").onclick = async () => {
+  const o = selP.selectedOptions[0];
+  const nom = o ? o.text.replace(/^★ /,"") : "Tunnel";
+  const txt = JSON.stringify({effet:EFFET, v:1, nom, reglages:R});
+  try{ await navigator.clipboard.writeText(txt); flash("Réglages copiés ✓"); }
+  catch(e){ const ta=document.getElementById("ta"); ta.value=txt; ta.select(); flash("Copie auto impossible : texte sélectionné en bas"); }
+};
+document.getElementById("bLoad").onclick = () => {
+  try{ const j = JSON.parse(document.getElementById("ta").value);
+    if (j.effet!==EFFET) throw 0; apply(j.reglages); flash("Chargé : "+(j.nom||"")); }
+  catch(e){ flash("JSON invalide ou autre effet"); }
+};
+fillSel("b0");
+
+// --- Messages ---
+const msg = document.getElementById("msg"); let msgT;
+function flash(t){ msg.textContent=t; clearTimeout(msgT); msgT=setTimeout(()=>msg.textContent="",2500); }
+
+// --- Kick ---
+const kd = document.getElementById("kd"); let kdT;
+function onKick(f=1){ fx.kick(f); kd.classList.add("on"); clearTimeout(kdT); kdT=setTimeout(()=>kd.classList.remove("on"),90); }
+document.getElementById("bTap").onclick = () => onKick();
+let auto=false, nextAuto=0;
+const bAuto=document.getElementById("bAuto");
+bAuto.onclick=()=>{ auto=!auto; bAuto.classList.toggle("on",auto); nextAuto=performance.now(); };
+
+// Détection identique à l'app : passe-bas + ratio RMS / moyenne glissante 800 ms
+let ac, an, lp, buf, hist=[], lastKick=0;
+const bMic=document.getElementById("bMic");
+bMic.onclick = async () => {
+  if (an){ return; }
+  try{
+    const s = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    ac = new (window.AudioContext||window.webkitAudioContext)();
+    const src = ac.createMediaStreamSource(s);
+    lp = ac.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=D.freq;
+    an = ac.createAnalyser(); an.fftSize=1024; buf=new Float32Array(an.fftSize);
+    src.connect(lp); lp.connect(an);
+    bMic.classList.add("on"); flash("Micro actif");
+  }catch(e){ flash("Micro refusé : "+e.name); }
+};
+function detect(now){
+  an.getFloatTimeDomainData(buf);
+  let s=0; for(let i=0;i<buf.length;i++) s+=buf[i]*buf[i];
+  const rms=Math.sqrt(s/buf.length);
+  hist.push([now,rms]); while(hist.length && now-hist[0][0]>800) hist.shift();
+  let a=0; for(const h of hist) a+=h[1]; a/=hist.length;
+  const ratio = rms/(a+1e-6);
+  if (ratio>D.sens && now-lastKick>D.gap && rms>0.004){ lastKick=now; onKick(Math.min(1.5,(ratio-1)/(D.sens-1)*0.6+0.4)); }
+}
+
+// --- Plein écran ---
+document.getElementById("bFull").onclick = () => {
+  document.body.classList.add("full");
+  document.documentElement.requestFullscreen?.().catch(()=>{});
+};
+cv.onclick = () => { if(document.body.classList.contains("full")){ document.body.classList.remove("full"); document.fullscreenElement && document.exitFullscreen(); } else onKick(); };
+
+function loop(now){
+  if (an) detect(now);
+  if (auto && now>=nextAuto){ onKick(); nextAuto += 60000/D.bpm; if(now-nextAuto>500) nextAuto=now+60000/D.bpm; }
+  fx.frame(now);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
