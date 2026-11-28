@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Labo d'effets — Boule de fumée</title>
+<style>
+  :root { --acc:#ff2d75; --panel:#0e0e13; --line:#23232c; --fg:#f2f2f5; --mut:#9a9aa8; --card:#15151c; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:#000; color:var(--fg);
+    font:14px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+
+  #app { position:fixed; inset:0; display:flex; flex-direction:column; }
+  #stage { position:relative; flex:0 0 46%; background:#000; overflow:hidden; }
+  #stage canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  #ui { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; background:var(--panel); border-top:1px solid var(--line); }
+  body.full #ui { display:none; }
+  body.full #stage { flex:1 1 auto; }
+  @media (orientation:landscape) and (min-width:800px){
+    #app { flex-direction:row; }
+    #stage { flex:1 1 auto; }
+    #ui { flex:0 0 380px; border-top:none; border-left:1px solid var(--line); }
+  }
+
+  .ov { position:absolute; z-index:2; top:calc(8px + env(safe-area-inset-top)); display:flex; gap:6px; }
+  #ovL { left:8px; } #ovR { right:8px; }
+  .ov button { background:rgba(20,20,26,.65); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+    border:1px solid rgba(255,255,255,.12); padding:6px 10px; font-size:12px; }
+  #fps { font:11px ui-monospace,monospace; color:#777; align-self:center; }
+
+  #start { position:absolute; inset:0; z-index:3; display:flex; flex-direction:column; gap:10px; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.55); text-align:center; padding:20px; }
+  #start button { font-size:16px; padding:12px 20px; }
+  #start p { color:var(--mut); margin:0; font-size:12px; max-width:300px; }
+  #start[hidden] { display:none; }
+
+  #head { padding:8px 10px; display:flex; flex-direction:column; gap:7px; border-bottom:1px solid var(--line); flex:none; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .row > button { flex:1 1 auto; }
+  #dot { width:14px; height:14px; border-radius:50%; background:#333; flex:none; }
+  #dot.hit { background:var(--acc); box-shadow:0 0 12px var(--acc); }
+  #meter { position:relative; flex:1; height:10px; background:#1a1a21; border-radius:5px; overflow:hidden; }
+  #meterFill { position:absolute; left:0; top:0; bottom:0; width:0; background:#4b4b5a; }
+  #meterThr { position:absolute; top:0; bottom:0; width:2px; background:var(--acc); }
+  #stat { font-size:12px; color:var(--mut); font-variant-numeric:tabular-nums; min-width:92px; text-align:right; }
+
+  #scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 10px calc(30px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:10px; }
+  details { background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  summary { list-style:none; padding:11px 12px; font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.07em; color:#c9c9d4; display:flex; justify-content:space-between; cursor:pointer; }
+  summary::-webkit-details-marker { display:none; }
+  summary::after { content:'+'; color:var(--mut); font-size:16px; line-height:12px; }
+  details[open] summary::after { content:'–'; }
+  .body { padding:0 12px 12px; display:flex; flex-direction:column; gap:12px; }
+  .help { color:var(--mut); font-size:12px; margin:0; }
+
+  .p { display:flex; flex-direction:column; gap:3px; }
+  .p .top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .p .lbl { font-size:13px; }
+  .p .lbl.mod::after { content:' •'; color:var(--acc); }
+  .p .val { font-size:12px; color:var(--mut); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .p .hint { font-size:11px; color:#6f6f7d; }
+  input[type=range] { width:100%; margin:4px 0; accent-color:var(--acc); height:24px; }
+  input[type=color] { width:56px; height:30px; border:1px solid #3a3a46; border-radius:6px; background:none; padding:0; }
+  .p.inline { flex-direction:row; align-items:center; justify-content:space-between; }
+
+  button, select, input[type=text], textarea { background:#24242c; color:var(--fg); border:1px solid #3a3a46; border-radius:8px; padding:8px 11px; font:inherit; }
+  button { cursor:pointer; }
+  button.on, button.pri { background:var(--acc); border-color:var(--acc); }
+  input[type=text] { flex:1; min-width:0; }
+  .seg { display:flex; gap:4px; flex-wrap:wrap; }
+  .seg button { flex:1; padding:7px 6px; font-size:12px; }
+
+  .preset { display:flex; gap:6px; align-items:center; }
+  .preset .n { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .preset button { padding:6px 9px; font-size:12px; }
+
+  #modal { position:fixed; inset:0; z-index:10; background:rgba(0,0,0,.7); display:flex; align-items:center; justify-content:center; padding:16px; }
+  #modal[hidden] { display:none; }
+  #modal .box { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; width:100%; max-width:480px; display:flex; flex-direction:column; gap:10px; }
+  #modal textarea { width:100%; height:180px; font:12px ui-monospace,monospace; resize:vertical; }
+  #toast { position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:11;
+    background:#2a2a33; border:1px solid #444; padding:9px 14px; border-radius:999px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="gl"></canvas>
+    <div class="ov" id="ovL"><button id="bBack" onclick="location.href='./'">← App</button><span id="fps"></span></div>
+    <div class="ov" id="ovR"><button id="bFull">Agrandir</button></div>
+    <div id="start">
+      <button class="pri" id="bMic">🎤 Activer le micro</button>
+      <button id="bNoMic">Sans micro (kick auto / tap)</button>
+      <p>Le micro sert à détecter le kick. Sans micro, tu peux taper le tempo ou régler un kick automatique dans « Détection ».</p>
+    </div>
+  </div>
+
+  <div id="ui">
+    <div id="head">
+      <div class="row">
+        <div id="dot"></div>
+        <div id="meter"><div id="meterFill"></div><div id="meterThr"></div></div>
+        <span id="stat">— BPM · 0</span>
+      </div>
+      <div class="row">
+        <button id="bTap">Tap kick</button>
+        <button class="pri" id="bCopy">📋 Copier les réglages</button>
+      </div>
+      <div class="row">
+        <button id="bPaste">Coller</button>
+        <button id="bReset">Défauts</button>
+        <button id="bRand">Hasard</button>
+      </div>
+    </div>
+    <div id="scroll"></div>
+  </div>
+</div>
+
+<div id="modal" hidden>
+  <div class="box">
+    <strong id="mTitle">Coller des réglages</strong>
+    <textarea id="mText" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+    <div class="row"><button id="mCancel">Annuler</button><button class="pri" id="mOk">Appliquer</button></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+
+/* =====================================================================
+   Paramètres de l'effet « Boule de fumée »
+   Chaque entrée : [id, libellé, min, max, pas, défaut, unité, aide]
+   ===================================================================== */
+const EFFECT = 'boule-de-fumee', VERSION = 1;
+const GROUPS = [
+  { name:'Détection du kick', open:true, help:'Un kick est détecté quand la jauge dépasse le trait rose.', params:[
+    ['sens',  'Sensibilité', 1.1, 3, 0.05, 1.5, '', 'plus bas = plus de kicks détectés'],
+    ['freq',  'Fréquence d\'écoute', 60, 400, 10, 140, ' Hz', 'monte vers 200–300 Hz avec un petit haut-parleur'],
+    ['gap',   'Écart mini entre kicks', 80, 500, 10, 140, ' ms'],
+    ['autoBpm','Kick automatique', 0, 180, 1, 0, ' BPM', '0 = désactivé ; pratique pour tester sans musique'],
+  ]},
+  { name:'Gonflement sur le kick', open:true, params:[
+    ['inflate',   'Gonflement', 0, 1.5, 0.01, 0.35, '×', 'de combien la boule grossit à chaque kick'],
+    ['attack',    'Attaque', 0, 150, 1, 15, ' ms', 'temps pour atteindre le gonflement max'],
+    ['release',   'Relâchement', 30, 1500, 10, 260, ' ms', 'temps pour se dégonfler'],
+    ['springFreq','Élasticité', 0.5, 12, 0.1, 4, ' Hz', 'vitesse du ressort qui suit le gonflement'],
+    ['springDamp','Amortissement', 0.05, 1.5, 0.01, 0.45, '', 'bas = rebondit comme de la gelée ; 1 = sans rebond'],
+    ['squash',    'Écrasement', -0.6, 0.6, 0.01, 0.12, '', '+ = s\'élargit et s\'aplatit sur le kick ; − = s\'étire en hauteur'],
+    ['kickTurb',  'Turbulence sur kick', 0, 2, 0.01, 0.5, '', 'le bord se déchire davantage sur le kick'],
+    ['kickFlow',  'Bouillonnement sur kick', 0, 10, 0.1, 2.5, '', 'la fumée accélère sur le kick'],
+    ['flash',     'Éclat sur kick', 0, 2, 0.01, 0.4, ''],
+  ]},
+  { name:'Danse', open:true, params:[
+    ['danceMode', 'Direction', 0, 4, 1, 0, 'select', ['Hasard','Gauche ↔ droite','Saut vers le haut','Cercle','Vers le centre']],
+    ['danceAmp',  'Pas de danse', 0, 0.4, 0.005, 0.06, '', 'distance parcourue à chaque kick'],
+    ['danceMax',  'Écart max du centre', 0, 0.6, 0.01, 0.2, ''],
+    ['danceReturn','Retour au centre', 50, 3000, 10, 600, ' ms'],
+    ['danceFreq', 'Souplesse', 0.5, 10, 0.1, 3, ' Hz', 'vitesse du ressort de déplacement'],
+    ['danceDamp', 'Amortissement', 0.05, 1.5, 0.01, 0.35, '', 'bas = dépasse et oscille'],
+    ['rotKick',   'Bascule sur kick', 0, 90, 1, 12, '°', 'la boule penche puis revient'],
+  ]},
+  { name:'Forme', params:[
+    ['radius', 'Taille', 0.05, 0.45, 0.005, 0.18, ''],
+    ['soft',   'Flou du bord', 0.02, 1, 0.01, 0.35, ''],
+    ['turb',   'Bord déchiqueté', 0, 1.5, 0.01, 0.45, ''],
+    ['warp',   'Distorsion', 0, 1, 0.01, 0.3, '', 'déformation globale de la boule'],
+    ['swirl',  'Tourbillon', -6, 6, 0.05, 0.8, '', 'torsion au centre ; le signe donne le sens'],
+  ]},
+  { name:'Fumée', params:[
+    ['scale',   'Taille des volutes', 0.5, 8, 0.05, 1.8, '', 'plus haut = volutes plus fines'],
+    ['oct',     'Niveau de détail', 1, 7, 1, 4, '', 'coûteux sur téléphone au-delà de 5'],
+    ['noiseAmt','Texture', 0, 1, 0.01, 0.75, '', '0 = boule lisse'],
+    ['core',    'Cœur dense', 0, 1, 0.01, 0.6, '', 'plus épais au centre, plus fin au bord'],
+    ['density', 'Densité', 0.2, 3, 0.01, 1, ''],
+    ['contrast','Contraste', 0.3, 3, 0.01, 1.1, ''],
+    ['wisps',   'Filaments', 0, 2, 0.01, 0.8, '', 'fumée qui s\'échappe autour'],
+    ['wispReach','Portée des filaments', 0.05, 2, 0.01, 0.5, ''],
+    ['flow',    'Vitesse de la fumée', 0, 2, 0.01, 0.25, ''],
+    ['relief',  'Relief', 0, 1.5, 0.01, 0.25, '', 'ombrage des volutes'],
+  ]},
+  { name:'Couleurs', params:[
+    ['cIn',   'Couleur du cœur', 0,0,0, '#ffffff', 'color'],
+    ['cOut',  'Couleur du bord', 0,0,0, '#7f8a99', 'color'],
+    ['cGlow', 'Couleur du halo', 0,0,0, '#6a7cff', 'color'],
+    ['bg',    'Fond', 0,0,0, '#000000', 'color'],
+    ['bright','Luminosité', 0.2, 3, 0.01, 1, ''],
+    ['glow',  'Halo', 0, 1.5, 0.01, 0.25, ''],
+    ['glowSize','Taille du halo', 0.1, 3, 0.01, 0.8, ''],
+    ['hueSpeed','Rotation des couleurs', -60, 60, 1, 0, '°/s'],
+    ['hueKick', 'Saut de couleur par kick', 0, 180, 1, 0, '°'],
+  ]},
+  { name:'Mouvement au repos', params:[
+    ['breathAmt',  'Respiration', 0, 0.3, 0.005, 0.04, ''],
+    ['breathSpeed','Vitesse de respiration', 0.05, 2, 0.01, 0.25, ' Hz'],
+    ['driftAmt',   'Flottement', 0, 0.3, 0.005, 0.03, ''],
+    ['driftSpeed', 'Vitesse du flottement', 0.01, 1, 0.01, 0.1, ' Hz'],
+  ]},
+  { name:'Rendu', params:[
+    ['res',     'Résolution', 0.25, 1, 0.05, 0.6, '×', 'baisse si ça saccade sur le téléphone (non exporté)'],
+    ['grain',   'Grain', 0, 0.3, 0.005, 0.04, ''],
+    ['vignette','Vignettage', 0, 1.5, 0.01, 0.4, ''],
+  ]},
+];
+// Paramètres propres au test (pas inclus dans l'export)
+const LOCAL_ONLY = new Set(['res', 'autoBpm']);
+
+const DEF = {}, META = {};
+for (const g of GROUPS) for (const p of g.params){
+  const [id, label, min, max, step, def, unit, extra] = p;
+  DEF[id] = def; META[id] = { id, label, min, max, step, def, unit, extra, group:g.name };
+}
+const P = Object.assign({}, DEF);
+
+/* ---------- Stockage ---------- */
+const KEY_CUR = 'lab-smoke-current', KEY_PRE = 'lab-smoke-presets';
+const loadJSON = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch(e){ return d; } };
+const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} };
+let saveTimer = 0;
+const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => saveJSON(KEY_CUR, P), 250); };
+
+/* =====================================================================
+   Interface des réglages
+   ===================================================================== */
+const decimals = s => { const t = String(s); return t.includes('.') ? t.split('.')[1].length : 0; };
+function fmt(m, v){
+  if (m.unit === 'select') return m.extra[v];
+  if (m.unit === 'color') return v;
+  if (m.id === 'autoBpm' && v === 0) return 'désactivé';
+  return (+v).toFixed(decimals(m.step)) + (m.unit || '');
+}
+const ctrls = {};
+function buildUi(){
+  const root = $('scroll');
+  for (const g of GROUPS){
+    const d = document.createElement('details'); if (g.open) d.open = true;
+    d.innerHTML = `<summary>${g.name}</summary><div class="body"></div>`;
+    const body = d.querySelector('.body');
+    if (g.help){ const h = document.createElement('p'); h.className = 'help'; h.textContent = g.help; body.append(h); }
+    for (const p of g.params) body.append(buildParam(META[p[0]]));
+    root.append(d);
+  }
+  // Presets locaux
+  const d = document.createElement('details'); d.open = true;
+  d.innerHTML = `<summary>Mes presets (sur ce téléphone)</summary><div class="body">
+    <div class="row"><input type="text" id="pName" placeholder="Nom du preset"><button id="pSave" class="pri">Enregistrer</button></div>
+    <div id="pList" style="display:flex;flex-direction:column;gap:6px"></div>
+    <p class="help">Touche le nom d'un réglage pour le remettre par défaut. Un point rose = modifié.</p></div>`;
+  root.append(d);
+  $('pSave').onclick = () => {
+    const name = $('pName').value.trim() || 'Preset ' + (loadJSON(KEY_PRE, []).length + 1);
+    const list = loadJSON(KEY_PRE, []).filter(x => x.nom !== name);
+    list.push(exportObj(name)); saveJSON(KEY_PRE, list); $('pName').value = ''; renderPresets(); toast('Preset « ' + name + ' » enregistré');
+  };
+  renderPresets();
+}
+function buildParam(m){
+  const w = document.createElement('div'); w.className = 'p';
+  if (m.unit === 'color'){
+    w.classList.add('inline');
+    w.innerHTML = `<span class="lbl"></span><input type="color">`;
+    const inp = w.querySelector('input'); inp.value = P[m.id];
+    inp.oninput = () => set(m.id, inp.value, false);
+    ctrls[m.id] = { w, inp };
+  } else if (m.unit === 'select'){
+    w.innerHTML = `<div class="top"><span class="lbl"></span></div><div class="seg"></div>`;
+    const seg = w.querySelector('.seg');
+    m.extra.forEach((n, i) => { const b = document.createElement('button'); b.textContent = n; b.onclick = () => set(m.id, i, false); seg.append(b); });
+    ctrls[m.id] = { w, seg };
+  } else {
+    w.innerHTML = `<div class="top"><span class="lbl"></span><span class="val"></span></div>
+      <input type="range" min="${m.min}" max="${m.max}" step="${m.step}">` + (m.extra ? `<span class="hint">${m.extra}</span>` : '');
+    const inp = w.querySelector('input');
+    inp.oninput = () => set(m.id, +inp.value, false);
+    ctrls[m.id] = { w, inp, val:w.querySelector('.val') };
+  }
+  const lbl = w.querySelector('.lbl'); lbl.textContent = m.label;
+  lbl.onclick = () => set(m.id, m.def, true);
+  return w;
+}
+function refreshCtrl(id){
+  const m = META[id], c = ctrls[id], v = P[id];
+  if (!c) return;
+  if (c.inp && c.inp.value != v) c.inp.value = v;
+  if (c.val) c.val.textContent = fmt(m, v);
+  if (c.seg) [...c.seg.children].forEach((b, i) => b.classList.toggle('on', i === v));
+  c.w.querySelector('.lbl').classList.toggle('mod', v !== m.def);
+}
+function set(id, v, updateInput){
+  P[id] = v; refreshCtrl(id); persist();
+  if (id === 'freq' && lp) lp.frequency.value = v;
+}
+function applyParams(obj){
+  for (const k in obj) if (k in DEF){
+    let v = obj[k];
+    if (META[k].unit === 'color'){ if (typeof v !== 'string' || !/^#[0-9a-f]{6}$/i.test(v)) continue; }
+    else { v = +v; if (!isFinite(v)) continue; v = Math.min(META[k].max, Math.max(META[k].min, v)); }
+    P[k] = v;
+  }
+  for (const k in DEF) refreshCtrl(k);
+  if (lp) lp.frequency.value = P.freq;
+  persist();
+}
+
+/* ---------- Export / import ---------- */
+function exportObj(name){
+  const reglages = {};
+  for (const k in DEF) if (!LOCAL_ONLY.has(k)) reglages[k] = P[k];
+  return { effet:EFFECT, v:VERSION, nom:name || 'Sans nom', reglages };
+}
+function parseImport(txt){
+  const i = txt.indexOf('{'), j = txt.lastIndexOf('}');
+  if (i < 0 || j < i) throw new Error('aucun JSON trouvé');
+  const o = JSON.parse(txt.slice(i, j + 1));
+  if (o.reglages) return o.reglages;
+  return o;
+}
+async function copyText(txt){
+  try { await navigator.clipboard.writeText(txt); return true; } catch(e){}
+  const ta = document.createElement('textarea'); ta.value = txt; ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;'; document.body.append(ta);
+  ta.select(); ta.setSelectionRange(0, txt.length);
+  let ok = false; try { ok = document.execCommand('copy'); } catch(e){}
+  ta.remove(); return ok;
+}
+async function copyPreset(name){
+  const txt = JSON.stringify(exportObj(name));
+  if (await copyText(txt)) toast('Réglages copiés ✓ — colle-les à Claude');
+  else openModal('Copie impossible : sélectionne et copie ce texte', txt, null);
+}
+function renderPresets(){
+  const list = loadJSON(KEY_PRE, []), root = $('pList'); root.innerHTML = '';
+  if (!list.length){ root.innerHTML = '<p class="help">Aucun preset enregistré.</p>'; return; }
+  list.forEach((pr, i) => {
+    const r = document.createElement('div'); r.className = 'preset';
+    r.innerHTML = `<span class="n"></span><button>Charger</button><button>📋</button><button>✕</button>`;
+    r.querySelector('.n').textContent = pr.nom;
+    const [bL, bC, bD] = r.querySelectorAll('button');
+    bL.onclick = () => { applyParams(pr.reglages); toast('« ' + pr.nom + ' » chargé'); };
+    bC.onclick = async () => {
+      const txt = JSON.stringify(pr);
+      if (await copyText(txt)) toast('« ' + pr.nom + ' » copié ✓'); else openModal('Copie ce texte', txt, null);
+    };
+    bD.onclick = () => { if (confirm('Supprimer « ' + pr.nom + ' » ?')){ list.splice(i, 1); saveJSON(KEY_PRE, list); renderPresets(); } };
+    root.append(r);
+  });
+}
+let modalCb = null;
+function openModal(title, text, cb){
+  $('mTitle').textContent = title; $('mText').value = text; modalCb = cb;
+  $('mOk').hidden = !cb; $('modal').hidden = false;
+  if (!cb){ $('mText').focus(); $('mText').select(); }
+}
+$('mCancel').onclick = () => { $('modal').hidden = true; };
+$('mOk').onclick = () => {
+  try { modalCb($('mText').value); $('modal').hidden = true; } catch(e){ toast('Réglages illisibles : ' + e.message); }
+};
+let toastT = 0;
+function toast(msg){ const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200); }
+
+/* =====================================================================
+   Audio : même détection de kick que l'app principale
+   ===================================================================== */
+let actx, analyser, hp, lp, micStream, abuf;
+const hist = []; let armed = true, lastRatio = 0;
+function initAudio(){
+  actx = new (window.AudioContext || window.webkitAudioContext)();
+  hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 35;
+  lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = P.freq; lp.Q.value = 0.8;
+  analyser = actx.createAnalyser(); analyser.fftSize = 1024; analyser.smoothingTimeConstant = 0;
+  hp.connect(lp); lp.connect(analyser);
+  abuf = new Float32Array(analyser.fftSize);
+}
+async function startMic(){
+  if (!actx) initAudio();
+  if (actx.state === 'suspended') await actx.resume();
+  micStream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false } });
+  actx.createMediaStreamSource(micStream).connect(hp);
+}
+function detect(now){
+  if (!analyser) return;
+  analyser.getFloatTimeDomainData(abuf);
+  let s = 0; for (let i = 0; i < abuf.length; i++) s += abuf[i]*abuf[i];
+  const rms = Math.sqrt(s/abuf.length);
+  hist.push([now, rms]);
+  while (hist.length && now - hist[0][0] > 800) hist.shift();
+  let avg = 0; for (const h of hist) avg += h[1]; avg /= hist.length;
+  const ratio = rms / (avg + 1e-6); lastRatio = ratio;
+  if (armed && ratio > P.sens && rms > 0.0002 && now - S.lastKick > P.gap){ kick(now); armed = false; }
+  else if (ratio < 1 + (P.sens - 1) * 0.5) armed = true;
+}
+
+/* =====================================================================
+   Dynamique de la boule (ressorts)
+   ===================================================================== */
+const S = {
+  lastKick:0, kicks:0, intervals:[], autoNext:0,
+  env:0, atk:false,               // enveloppe du kick (0..1)
+  inf:0, infV:0,                  // ressort du gonflement
+  tx:0, ty:0, ox:0, oy:0, ovx:0, ovy:0,   // cible / position / vitesse de la danse
+  rot:0, rotV:0, dir:1, ang:Math.random()*6.28,
+  smokeT:Math.random()*50, hue:0, t:0,
+};
+function kick(now){
+  now = now || performance.now();
+  if (S.lastKick){ const iv = now - S.lastKick; if (iv > 250 && iv < 1500){ S.intervals.push(iv); if (S.intervals.length > 12) S.intervals.shift(); } }
+  S.lastKick = now; S.kicks++;
+  S.atk = true; if (P.attack <= 0) { S.env = 1; S.atk = false; }
+  // Danse : nouveau pas
+  const a = P.danceAmp; let dx = 0, dy = 0;
+  switch (P.danceMode){
+    case 0: { const t = Math.random()*Math.PI*2; dx = Math.cos(t)*a; dy = Math.sin(t)*a; break; }
+    case 1: S.dir = -S.dir; dx = S.dir*a; dy = (Math.random()-.5)*a*.3; break;
+    case 2: dy = a; dx = (Math.random()-.5)*a*.4; break;
+    case 3: S.ang += Math.PI/2; dx = Math.cos(S.ang)*a; dy = Math.sin(S.ang)*a; break;
+    case 4: { const r = Math.hypot(S.tx, S.ty); if (r > 1e-4){ dx = -S.tx/r*a; dy = -S.ty/r*a; } else { const t = Math.random()*6.28; dx = Math.cos(t)*a; dy = Math.sin(t)*a; } break; }
+  }
+  S.tx += dx; S.ty += dy;
+  const r = Math.hypot(S.tx, S.ty); if (r > P.danceMax && r > 0){ S.tx *= P.danceMax/r; S.ty *= P.danceMax/r; }
+  // Bascule
+  const w = 2*Math.PI*P.springFreq;
+  S.rotV += (Math.random() < .5 ? -1 : 1) * P.rotKick*Math.PI/180 * w;
+  S.hue += P.hueKick;
+  const d = $('dot'); d.classList.add('hit'); setTimeout(() => d.classList.remove('hit'), 70);
+}
+function bpm(){
+  if (S.intervals.length < 4) return null;
+  const a = [...S.intervals].sort((x, y) => x - y);
+  return Math.round(60000 / a[a.length >> 1]);
+}
+function spring(x, v, target, freq, damp, dt){
+  const w = 2*Math.PI*freq;
+  const a = w*w*(target - x) - 2*damp*w*v;
+  v += a*dt; x += v*dt; return [x, v];
+}
+function step(dt, now){
+  // Kick automatique (test sans musique)
+  if (P.autoBpm > 0){
+    const iv = 60000/P.autoBpm;
+    if (!S.autoNext || now >= S.autoNext + iv*2) S.autoNext = now;
+    if (now >= S.autoNext){ kick(now); S.autoNext += iv; }
+  } else S.autoNext = 0;
+
+  // Enveloppe : attaque linéaire puis décroissance exponentielle
+  if (S.atk){ S.env += dt*1000/Math.max(1, P.attack); if (S.env >= 1){ S.env = 1; S.atk = false; } }
+  else S.env *= Math.exp(-dt*1000*3/P.release);
+
+  // Retour progressif de la cible de danse vers le centre
+  const k = Math.exp(-dt*1000*3/P.danceReturn); S.tx *= k; S.ty *= k;
+
+  // Ressorts (sous-pas pour la stabilité)
+  const n = Math.max(1, Math.ceil(dt/(1/240))), h = dt/n;
+  for (let i = 0; i < n; i++){
+    [S.inf, S.infV] = spring(S.inf, S.infV, S.env, P.springFreq, P.springDamp, h);
+    [S.ox, S.ovx] = spring(S.ox, S.ovx, S.tx, P.danceFreq, P.danceDamp, h);
+    [S.oy, S.ovy] = spring(S.oy, S.ovy, S.ty, P.danceFreq, P.danceDamp, h);
+    [S.rot, S.rotV] = spring(S.rot, S.rotV, 0, P.springFreq, P.springDamp, h);
+  }
+  S.t += dt;
+  S.smokeT += dt*(P.flow + P.kickFlow*S.env*0.3);
+  S.hue += P.hueSpeed*dt;
+}
+
+/* =====================================================================
+   Rendu WebGL
+   ===================================================================== */
+const VS = `attribute vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }`;
+const FS = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform vec2 uRes, uOff, uStretch;
+uniform float uT, uR, uRot, uSoft, uScale, uOct, uTurb, uWarp, uSwirl, uDensity, uContrast, uNoiseAmt, uCore,
+  uWisps, uWispReach, uGlow, uGlowSize, uRelief, uBright, uFlash, uHue, uGrain, uGrainT, uVignette;
+uniform vec3 uCIn, uCOut, uCGlow, uBg;
+
+vec3 mod289(vec3 x){ return x - floor(x*(1./289.))*289.; }
+vec4 mod289(vec4 x){ return x - floor(x*(1./289.))*289.; }
+vec4 permute(vec4 x){ return mod289(((x*34.)+1.)*x); }
+vec4 taylorInvSqrt(vec4 r){ return 1.79284291400159 - 0.85373472095314*r; }
+float snoise(vec3 v){
+  const vec2 C = vec2(1./6., 1./3.);
+  const vec4 D = vec4(0., .5, 1., 2.);
+  vec3 i = floor(v + dot(v, C.yyy));
+  vec3 x0 = v - i + dot(i, C.xxx);
+  vec3 g = step(x0.yzx, x0.xyz);
+  vec3 l = 1. - g;
+  vec3 i1 = min(g.xyz, l.zxy);
+  vec3 i2 = max(g.xyz, l.zxy);
+  vec3 x1 = x0 - i1 + C.xxx;
+  vec3 x2 = x0 - i2 + C.yyy;
+  vec3 x3 = x0 - D.yyy;
+  i = mod289(i);
+  vec4 p = permute(permute(permute(i.z + vec4(0., i1.z, i2.z, 1.)) + i.y + vec4(0., i1.y, i2.y, 1.)) + i.x + vec4(0., i1.x, i2.x, 1.));
+  float n_ = 0.142857142857;
+  vec3 ns = n_*D.wyz - D.xzx;
+  vec4 j = p - 49.*floor(p*ns.z*ns.z);
+  vec4 x_ = floor(j*ns.z);
+  vec4 y_ = floor(j - 7.*x_);
+  vec4 x = x_*ns.x + ns.yyyy;
+  vec4 y = y_*ns.x + ns.yyyy;
+  vec4 h = 1. - abs(x) - abs(y);
+  vec4 b0 = vec4(x.xy, y.xy);
+  vec4 b1 = vec4(x.zw, y.zw);
+  vec4 s0 = floor(b0)*2. + 1.;
+  vec4 s1 = floor(b1)*2. + 1.;
+  vec4 sh = -step(h, vec4(0.));
+  vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+  vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+  vec3 p0 = vec3(a0.xy, h.x);
+  vec3 p1 = vec3(a0.zw, h.y);
+  vec3 p2 = vec3(a1.xy, h.z);
+  vec3 p3 = vec3(a1.zw, h.w);
+  vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+  vec4 m = max(.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.);
+  m = m*m;
+  return 42.*dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+}
+float fbm(vec3 p, float oct){
+  float s = 0., a = .5, t = 0.;
+  for (int i = 0; i < 7; i++){
+    if (float(i) >= oct) break;
+    s += a*snoise(p); t += a;
+    p = p*2.03 + vec3(1.7, -3.1, 2.3); a *= .5;
+  }
+  return s/t;
+}
+mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+vec3 hueRot(vec3 c, float a){ const vec3 k = vec3(.57735); float ca = cos(a); return c*ca + cross(k, c)*sin(a) + k*dot(k, c)*(1. - ca); }
+float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)))*43758.5453); }
+
+void main(){
+  float mn = min(uRes.x, uRes.y);
+  vec2 uv = (gl_FragCoord.xy - .5*uRes)/mn;
+  vec2 p = rot(uRot)*(uv - uOff);
+  p /= uStretch;
+  float r0 = length(p)/uR;
+  p = rot(uSwirl*exp(-r0*r0*1.2))*p;          // tourbillon
+  vec2 q = p/uR*(uScale*.5);                    // coordonnées liées à la boule
+
+  // Distorsion globale (domain warping)
+  vec2 w = vec2(fbm(vec3(q*.7, uT*.8) + vec3(0., 0., 1.7), 2.),
+                fbm(vec3(q*.7, uT*.8) + vec3(5.2, 1.3, -2.1), 2.));
+  vec2 pw = p + uWarp*uR*w;
+  float d = length(pw)/uR;
+
+  // Texture interne et bord
+  vec3 nq = vec3(q + 1.5*w, uT*1.3);
+  float n = fbm(nq, uOct)*.5 + .5;
+  float eN = fbm(vec3(q*1.7 + 7.3, uT*1.1), 3.);
+  float dd = d + uTurb*eN*.5;
+  float body = 1. - smoothstep(1. - uSoft, 1.0001, dd);
+  float thick = sqrt(clamp(1. - dd*dd, 0., 1.));
+  float dens = body*mix(1., thick, uCore)*mix(1., n*1.6, uNoiseAmt);
+
+  // Filaments qui s'échappent
+  float outside = max(dd - 1. + uSoft*.5, 0.);
+  float wisp = uWisps*smoothstep(.45, .85, n)*exp(-outside*(4./max(uWispReach, .01)))*(1. - body*.7);
+  dens += wisp;
+  dens = pow(max(dens*uDensity, 0.), uContrast);
+
+  // Relief (ombrage façon lumière en haut à gauche)
+  float light = 1.;
+  if (uRelief > .001){
+    float n2 = fbm(nq + vec3(-.06, .06, 0.), uOct)*.5 + .5;
+    light = clamp(1. + (n - n2)*6.*uRelief, .15, 2.);
+  }
+
+  vec3 smoke = mix(uCOut, uCIn, clamp(thick*n*1.5, 0., 1.))*light*uBright*(1. + uFlash);
+  float g = uGlow*exp(-pow(max(d - .3, 0.)/(.5 + uGlowSize), 2.)*2.);
+  vec3 glow = uCGlow*g*(1. + uFlash*.5);
+  smoke = hueRot(smoke, uHue); glow = hueRot(glow, uHue);
+
+  vec3 col = mix(uBg, smoke, clamp(dens, 0., 1.)) + glow*(1. - clamp(dens, 0., 1.)*.5);
+  col = 1. - exp(-col*1.6);                     // compression douce des hautes lumières
+  col *= 1. - uVignette*.35*dot(uv, uv);
+  col += (hash(gl_FragCoord.xy + uGrainT) - .5)*uGrain;
+  gl_FragColor = vec4(max(col, 0.), 1.);
+}`;
+
+const canvas = $('gl');
+const gl = canvas.getContext('webgl', { antialias:false, alpha:false, preserveDrawingBuffer:false, powerPreference:'high-performance' });
+let prog, U = {};
+function initGL(){
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+  gl.bindAttribLocation(prog, 0, 'a'); gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const n = gl.getProgramParameter(prog, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++){ const u = gl.getActiveUniform(prog, i); U[u.name] = gl.getUniformLocation(prog, u.name); }
+}
+const hex = h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16)/255);
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 2) * P.res;
+  const w = Math.max(1, Math.round(canvas.clientWidth*dpr)), h = Math.max(1, Math.round(canvas.clientHeight*dpr));
+  if (canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; }
+  gl.viewport(0, 0, w, h);
+}
+function render(){
+  resize();
+  const f = (n, v) => U[n] && gl.uniform1f(U[n], v);
+  const breath = P.breathAmt*Math.sin(S.t*2*Math.PI*P.breathSpeed);
+  const R = Math.max(0.01, P.radius*(1 + P.inflate*S.inf + breath));
+  const ds = 2*Math.PI*P.driftSpeed;
+  const dx = P.driftAmt*(Math.sin(S.t*ds) + .5*Math.sin(S.t*ds*2.3 + 1.)) / 1.5;
+  const dy = P.driftAmt*(Math.cos(S.t*ds*.8 + .4) + .5*Math.sin(S.t*ds*1.7 + 2.)) / 1.5;
+  const sq = P.squash*S.inf;
+  gl.uniform2f(U.uRes, canvas.width, canvas.height);
+  gl.uniform2f(U.uOff, S.ox + dx, S.oy + dy);
+  gl.uniform2f(U.uStretch, Math.max(.2, 1 + sq), Math.max(.2, 1 - sq));
+  f('uT', S.smokeT); f('uR', R); f('uRot', S.rot);
+  f('uSoft', P.soft); f('uScale', P.scale); f('uOct', P.oct);
+  f('uTurb', P.turb + P.kickTurb*S.env); f('uWarp', P.warp); f('uSwirl', P.swirl);
+  f('uDensity', P.density); f('uContrast', P.contrast); f('uNoiseAmt', P.noiseAmt); f('uCore', P.core);
+  f('uWisps', P.wisps); f('uWispReach', P.wispReach); f('uGlow', P.glow); f('uGlowSize', P.glowSize);
+  f('uRelief', P.relief); f('uBright', P.bright); f('uFlash', P.flash*S.env);
+  f('uHue', S.hue*Math.PI/180); f('uGrain', P.grain); f('uGrainT', (S.t*60 % 100)); f('uVignette', P.vignette);
+  gl.uniform3fv(U.uCIn, hex(P.cIn)); gl.uniform3fv(U.uCOut, hex(P.cOut));
+  gl.uniform3fv(U.uCGlow, hex(P.cGlow)); gl.uniform3fv(U.uBg, hex(P.bg));
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/* ---------- Boucle ---------- */
+let lastT = performance.now(), fpsN = 0, fpsT = 0, uiT = 0;
+function frame(now){
+  const dt = Math.min(0.1, (now - lastT)/1000); lastT = now;
+  detect(now); step(dt, now); render();
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5){ $('fps').textContent = Math.round(fpsN/fpsT) + ' i/s'; fpsN = 0; fpsT = 0; }
+  if (now - uiT > 60){
+    uiT = now;
+    const maxR = 3.2, pct = v => Math.min(100, Math.max(0, (v - 0.6)/(maxR - 0.6)*100));
+    $('meterFill').style.width = pct(lastRatio) + '%';
+    $('meterThr').style.left = pct(P.sens) + '%';
+    const b = bpm(); $('stat').textContent = (b ? b + ' BPM' : '— BPM') + ' · ' + S.kicks;
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ---------- Boutons ---------- */
+$('bMic').onclick = async () => {
+  try { await startMic(); $('start').hidden = true; toast('Micro actif'); }
+  catch(e){ toast('Micro refusé : ' + e.message); }
+};
+$('bNoMic').onclick = () => { $('start').hidden = true; if (!P.autoBpm) set('autoBpm', 124); };
+$('bTap').onclick = () => kick();
+$('bCopy').onclick = () => {
+  const name = prompt('Nom du preset (facultatif) :', '') ;
+  if (name === null) return;
+  copyPreset(name.trim() || 'Boule de fumée');
+};
+$('bPaste').onclick = () => openModal('Colle des réglages ici', '', txt => { applyParams(parseImport(txt)); toast('Réglages appliqués'); });
+$('bReset').onclick = () => { if (confirm('Remettre tous les réglages par défaut ?')){ const keep = { res:P.res }; applyParams(Object.assign({}, DEF, keep)); } };
+$('bRand').onclick = () => {
+  const o = {};
+  for (const k in META){
+    const m = META[k];
+    if (LOCAL_ONLY.has(k) || m.group === 'Détection du kick' || m.unit === 'color') continue;
+    if (m.unit === 'select'){ o[k] = Math.floor(Math.random()*m.extra.length); continue; }
+    // Hasard autour de la valeur par défaut, pour rester dans le style
+    const span = (m.max - m.min)*0.35, v = m.def + (Math.random()*2 - 1)*span;
+    o[k] = +(Math.round(Math.min(m.max, Math.max(m.min, v))/m.step)*m.step).toFixed(decimals(m.step));
+  }
+  applyParams(o); toast('Réglages au hasard');
+};
+$('bFull').onclick = () => {
+  document.body.classList.toggle('full');
+  $('bFull').textContent = document.body.classList.contains('full') ? 'Réglages' : 'Agrandir';
+};
+document.addEventListener('keydown', e => { if (e.code === 'Space' && e.target === document.body){ e.preventDefault(); kick(); } });
+
+/* ---------- Démarrage ---------- */
+buildUi();
+applyParams(loadJSON(KEY_CUR, {}));
+try { initGL(); requestAnimationFrame(frame); }
+catch(e){ document.getElementById('start').innerHTML = '<p style="color:#f66">WebGL indisponible : ' + e.message + '</p>'; console.error(e); }
+</script>
+</body>
+</html>
