@@ -283,6 +283,16 @@
         <p class="help">Baisse la qualité si l'image saccade.</p>
       </div>
       <div class="card">
+        <h3>Tunnel infini</h3>
+        <p class="help">Source virtuelle : des formes géométriques psychédéliques qui avancent sans fin et accélèrent sur le kick. Les presets se règlent dans le <a href="lab-tunnel.html" style="color:var(--acc)">labo du tunnel</a> ; la vitesse ci-dessous s'applique en plus du preset.</p>
+        <div class="row"><button id="bTunnel">🌀 Afficher le tunnel</button></div>
+        <div class="row"><span class="lbl">Preset</span><select id="selTunnel"></select><button id="bTunnelPaste">Coller du labo</button><button id="bTunnelDel" hidden>✕</button></div>
+        <div class="grid">
+          <span class="lbl">Vitesse</span><input id="tunnelSpeed" type="range" min="0.3" max="2.5" step="0.05" value="1"><span class="val" id="tunnelSpeedV"></span>
+          <span class="lbl">Qualité</span><input id="tunnelQ" type="range" min="0.3" max="1" step="0.05" value="0.75"><span class="val" id="tunnelQV"></span>
+        </div>
+      </div>
+      <div class="card">
         <h3>Banque de vidéos</h3>
         <p class="help">Les vidéos tournent en boucle, comme une caméra.</p>
         <div class="row">
@@ -369,6 +379,7 @@
 </div>
 
 <script src="flock.js"></script>
+<script src="tunnel.js"></script>
 <script>
 (() => {
 'use strict';
@@ -1041,6 +1052,43 @@ void main(){
     setPreset(reg){ P = Object.assign({}, SMOKE_DEF); for (const k in reg) if (k in SMOKE_DEF) P[k] = reg[k]; },
   };
 })();
+/* ================= Tunnel infini (source virtuelle, partagée avec lab-tunnel.html via tunnel.js) ================= */
+const TUNNEL_APP_BUILTIN = TUNNEL_BUILTIN.map(p => Object.assign({ effet: 'tunnel', v: 1 }, p));
+const TUNNEL = (() => {
+  const cv = document.createElement('canvas'); cv.width = 1280; cv.height = 720;
+  let fx = null; try { fx = makeTunnel(cv); } catch(e){ console.warn('Tunnel', e); }
+  return {
+    canvas: cv, ok: !!fx,
+    update(now){
+      if (!fx) return;
+      const q = +$('tunnelQ').value, w = Math.round(1280*q), h = Math.round(720*q);
+      if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; }
+      fx.frame(now);
+    },
+    kick(){ fx && fx.kick(); },
+    set(r){ fx && fx.set(r); },
+  };
+})();
+let tunnelUser = loadJSON('dcs-tunnel-presets', []);
+const tunnelAll = () => TUNNEL_APP_BUILTIN.concat(tunnelUser);
+function applyTunnel(){
+  const p = tunnelAll()[S.tunnelPreset || 0] || TUNNEL_APP_BUILTIN[0];
+  const r = Object.assign({}, TUNNEL_DEF, p.reglages);
+  r.vitesse *= +$('tunnelSpeed').value;
+  TUNNEL.set(r);
+}
+function setTunnelPreset(i){
+  S.tunnelPreset = Math.max(0, Math.min(tunnelAll().length - 1, i|0));
+  try { localStorage.setItem('dcs-tunnel-cur', String(S.tunnelPreset)); } catch(e){}
+  applyTunnel(); refreshTunnelList();
+}
+function refreshTunnelList(){
+  const sel = $('selTunnel'); sel.innerHTML = '';
+  tunnelAll().forEach((p, i) => sel.add(new Option(p.nom + (i >= TUNNEL_APP_BUILTIN.length ? ' (collé)' : ''), String(i))));
+  sel.value = String(S.tunnelPreset || 0);
+  $('bTunnelDel').hidden = (S.tunnelPreset || 0) < TUNNEL_APP_BUILTIN.length;
+}
+
 let smokeUser = loadJSON('dcs-smoke-presets', []);
 const smokeAll = () => SMOKE_BUILTIN.concat(smokeUser);
 function setSmokePreset(i){
@@ -1068,7 +1116,7 @@ function whenReady(el){
 }
 async function sourceEl(src){
   if (src.type === 'cam') return getCamVideo(src.deviceId);
-  if (src.type === 'flock' || src.type === 'smoke') return src.el;
+  if (src.type === 'flock' || src.type === 'smoke' || src.type === 'tunnel') return src.el;
   await src.el.play().catch(()=>{});
   return src.el;
 }
@@ -1113,7 +1161,7 @@ function nextManualSource(){
 
 /* Sources cochées + types d'effets autorisés par source (mémorisés dans le navigateur) */
 const FX_TYPES = [['kick', 'Kick'], ['bg', 'Fond'], ['edge', 'Bords'], ['anim', 'Animaux']];
-function srcKey(s){ return s.type === 'cam' ? 'cam:' + s.deviceId : (s.type === 'flock' || s.type === 'smoke') ? s.type : 'video:' + s.label; }
+function srcKey(s){ return s.type === 'cam' ? 'cam:' + s.deviceId : (s.type === 'flock' || s.type === 'smoke' || s.type === 'tunnel') ? s.type : 'video:' + s.label; }
 function loadJSON(k, d){ try { return JSON.parse(localStorage.getItem(k)) || d; } catch(e){ return d; } }
 function saveJSON(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
 const srcOff = new Set(loadJSON('dcs-src-off', []));
@@ -1260,6 +1308,7 @@ function kick(now){
   if ((S.cats || S.alpacas) && allowed('anim')) spawnCats();
   if (S.video === FLOCK.canvas) FLOCK.kick();
   if (S.video === SMOKE.canvas) SMOKE.kick();
+  if (S.video === TUNNEL.canvas) TUNNEL.kick();
   const d = $('dot'); d.classList.add('hit'); setTimeout(() => d.classList.remove('hit'), 70);
 }
 function bpm(){
@@ -1594,6 +1643,7 @@ function frame(now){
   const inTr = trP < 1 && S.tr > 0;
   if (S.video === FLOCK.canvas || (inTr && S.prevEl === FLOCK.canvas)) FLOCK.update(dt, now);
   if (S.video === SMOKE.canvas || (inTr && S.prevEl === SMOKE.canvas)) SMOKE.update(dt);
+  if (S.video === TUNNEL.canvas || (inTr && S.prevEl === TUNNEL.canvas)) TUNNEL.update(now);
   const upload = (unit, tex, el) => {
     gl.activeTexture(unit); gl.bindTexture(gl.TEXTURE_2D, tex);
     const isCanvas = el instanceof HTMLCanvasElement;
@@ -1746,7 +1796,7 @@ function frame(now){
 }
 
 /* ================= Favoris ================= */
-const P_SLIDERS = ['amt', 'dur', 'bgAmt', 'bgSpeed', 'echoLen', 'echoThr', 'edgeAmt', 'edgeSize', 'edgeSpeed', 'smokeSize', 'birdSize', 'flockSpeed'];
+const P_SLIDERS = ['amt', 'dur', 'bgAmt', 'bgSpeed', 'echoLen', 'echoThr', 'edgeAmt', 'edgeSize', 'edgeSpeed', 'smokeSize', 'birdSize', 'flockSpeed', 'tunnelSpeed'];
 const P_TOGGLES = { echoRainbow: 'bEchoRainbow', edgePulse: 'bEdgePulse', cats: 'bCats', alpacas: 'bAlp' };
 let presets = loadJSON('dcs-presets', []);
 const savePresets = () => saveJSON('dcs-presets', presets);
@@ -1755,7 +1805,8 @@ function snapshot(){
   const cur = S.sources[S.srcIdx];
   const p = { src: S.favSrc && cur ? { key: srcKey(cur), label: cur.label } : null,
     kick: [...S.kfx].sort(), bg: [...S.bg].sort((a, b) => a - b), edge: S.edge, set: {}, tog: {},
-    smoke: smokeAll()[S.smokePreset || 0]?.nom, flock: flockAll()[S.flockPreset || 0]?.nom };
+    smoke: smokeAll()[S.smokePreset || 0]?.nom, flock: flockAll()[S.flockPreset || 0]?.nom,
+    tunnel: tunnelAll()[S.tunnelPreset || 0]?.nom };
   P_SLIDERS.forEach(id => p.set[id] = +$(id).value);
   for (const k in P_TOGGLES) p.tog[k] = !!S[k];
   return p;
@@ -1774,6 +1825,7 @@ function addPreset(name){
 function applyPreset(p){
   if (p.src){ const i = S.sources.findIndex(s => srcKey(s) === p.src.key); if (i >= 0) switchSource(i); }
   if (p.flock){ const j = flockAll().findIndex(x => x.nom === p.flock); if (j >= 0) setFlockPreset(j); }
+  if (p.tunnel){ const j = tunnelAll().findIndex(x => x.nom === p.tunnel); if (j >= 0) setTunnelPreset(j); }
   if (p.smoke){ const j = smokeAll().findIndex(x => x.nom === p.smoke); if (j >= 0){ setSmokePreset(j); refreshSmokeList(); } }
   S.kfx = new Set(p.kick.filter(i => i < KICK.length)); refreshKick();
   setBg(new Set(p.bg.filter(i => BG[i])));
@@ -1980,6 +2032,28 @@ function setupUi(){
     if (!confirm('Supprimer « ' + flockUser[i].nom + ' » ?')) return;
     flockUser.splice(i, 1); saveJSON('dcs-flock-presets', flockUser); setFlockPreset(0);
   };
+  $('bTunnel').onclick = () => switchSource(S.sources.findIndex(x => x.type === 'tunnel'));
+  bindSlider('tunnelSpeed', v => '×' + (+v).toFixed(2), () => applyTunnel());
+  bindSlider('tunnelQ', v => Math.round(v*100) + ' %');
+  setTunnelPreset(+(localStorage.getItem('dcs-tunnel-cur') || 0));
+  $('selTunnel').onchange = e => setTunnelPreset(+e.target.value);
+  $('bTunnelPaste').onclick = () => {
+    const txt = prompt('Colle ici les réglages copiés dans le labo du tunnel :', '');
+    if (!txt) return;
+    try {
+      const i = txt.indexOf('{'), j = txt.lastIndexOf('}');
+      const o = JSON.parse(txt.slice(i, j + 1));
+      if (!o.reglages || (o.effet && o.effet !== 'tunnel')) throw new Error('ce ne sont pas des réglages de tunnel');
+      o.nom = o.nom || 'Preset collé';
+      tunnelUser = tunnelUser.filter(p => p.nom !== o.nom); tunnelUser.push(o); saveJSON('dcs-tunnel-presets', tunnelUser);
+      setTunnelPreset(tunnelAll().indexOf(o));
+    } catch(e){ alert('Réglages illisibles : ' + e.message); }
+  };
+  $('bTunnelDel').onclick = () => {
+    const i = S.tunnelPreset - TUNNEL_APP_BUILTIN.length; if (i < 0) return;
+    if (!confirm('Supprimer « ' + tunnelUser[i].nom + ' » ?')) return;
+    tunnelUser.splice(i, 1); saveJSON('dcs-tunnel-presets', tunnelUser); setTunnelPreset(0);
+  };
   $('bAddVid').onclick = () => $('fileVid').click();
   $('fileVid').onchange = e => {
     for (const f of e.target.files) addVideo(URL.createObjectURL(f), f.name, true);
@@ -2049,6 +2123,7 @@ async function start(){
   S.srcIdx = idx; S.video = v; S.curMir = true;
   addSource({ type: 'flock', label: "🐦 Nuée d'étourneaux", el: FLOCK.canvas });
   if (SMOKE.ok) addSource({ type: 'smoke', label: '💨 Boule de fumée', el: SMOKE.canvas });
+  if (TUNNEL.ok) addSource({ type: 'tunnel', label: '🌀 Tunnel infini', el: TUNNEL.canvas });
   await loadRepoVideos();
   refreshSources();
 

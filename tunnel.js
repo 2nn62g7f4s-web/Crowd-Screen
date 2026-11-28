@@ -39,6 +39,10 @@
   };
 
   const TUNNEL_BUILTIN = [
+    { nom: "Triangle 1", reglages: { cotes: 3, couches: 11, epaisseur: 0.06, remplissage: 0.4, kaleido: 0, fondTunnel: 0.2, rayures: 2,
+        vitesse: 1.75, torsion: 0.14, rotation: -0.12, ondulation: 0.7, derive: 0, brouillard: 0.9, teinte: 0.5, vitesseTeinte: 0.055,
+        ecartTeinte: 0.04, saturation: 0.75, lueur: 0.15, kickVitesse: 1, kickDuree: 0.35, kickZoom: 0.2, kickFlash: 0.2,
+        kickTeinte: 0.08, kickEpaisseur: 0.8 } },
     { nom: "Néon hexagones", reglages: { ...TUNNEL_DEF } },
     { nom: "Kaléido acide", reglages: { ...TUNNEL_DEF, cotes: 3, couches: 18, kaleido: 6, torsion: 0.3, rotation: 0.3,
         remplissage: 0.55, fondTunnel: 0.2, ecartTeinte: 0.13, vitesseTeinte: 0.08, saturation: 1, ondulation: 0.4, kickTeinte: 0.2 } },
@@ -105,7 +109,7 @@ void main(){
 
   function makeTunnel(canvas, reglages) {
     const R = { ...TUNNEL_DEF, ...(reglages || {}) };
-    const gl = canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: false });
+    const gl = canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
     if (!gl) throw new Error("WebGL indisponible");
     const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o);
       if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
@@ -123,10 +127,13 @@ void main(){
 
     function resize(rm) {
       if (rm) resMax = rm;
-      const d = Math.min(window.devicePixelRatio || 1, resMax);
-      const w = Math.max(1, Math.round(canvas.clientWidth * d)), h = Math.max(1, Math.round(canvas.clientHeight * d));
-      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-      gl.viewport(0, 0, w, h);
+      // Canvas hors page (source virtuelle de l'app) : on garde la taille fixée par l'appelant
+      if (canvas.clientWidth) {
+        const d = Math.min(window.devicePixelRatio || 1, resMax);
+        const w = Math.max(1, Math.round(canvas.clientWidth * d)), h = Math.max(1, Math.round(canvas.clientHeight * d));
+        if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      }
+      gl.viewport(0, 0, canvas.width, canvas.height);
     }
     function kick(f = 1) { env = Math.max(env, Math.min(1.5, f)); hueTarget += R.kickTeinte; }
     function set(r) { const old = R.teinte; Object.assign(R, r || {}); if (R.teinte !== old) hue = R.teinte; }

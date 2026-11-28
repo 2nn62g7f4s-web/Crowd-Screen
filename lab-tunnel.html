@@ -53,7 +53,7 @@
 </div>
 <script src="tunnel.js"></script>
 <script>
-const EFFET = "tunnel", KEY = "dcs-tunnel-presets", DKEY = "dcs-tunnel-lab-det";
+const EFFET = "tunnel", KEY = "dcs-tunnel-lab-presets", DKEY = "dcs-tunnel-lab-det";
 const SCHEMA = [
   ["Forme"],
   ["cotes","Côtés (0=cercle)",0,8,1],["couches","Couches",4,32,1],["epaisseur","Épaisseur",0.005,0.2,0.005],
@@ -72,6 +72,10 @@ const DSCHEMA = [
   ["sens","Sensibilité",1.1,3,0.05],["gap","Écart min (ms)",100,600,10],["freq","Passe-bas (Hz)",60,400,5],
   ["bpm","BPM kick auto",60,180,1],["res","Résolution max",0.5,3,0.25],
 ];
+// Ancienne clé (première version du labo) : on récupère les presets puis on libère la clé, utilisée par l'app
+try{ const old=localStorage.getItem("dcs-tunnel-presets");
+  if(old && !localStorage.getItem(KEY)) localStorage.setItem(KEY, old);
+  if(old && !/"effet"/.test(old)) localStorage.removeItem("dcs-tunnel-presets"); }catch(e){}
 let R = {...TUNNEL_DEF};
 let D = {sens:1.5,gap:250,freq:150,bpm:126,res:1.5};
 try{ Object.assign(D, JSON.parse(localStorage.getItem(DKEY)||"{}")); }catch(e){}
