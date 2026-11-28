@@ -273,6 +273,17 @@
         </div>
       </div>
       <div class="card">
+        <h3>Boule de fumée</h3>
+        <p class="help">Source virtuelle : une boule de fumée sur fond noir qui gonfle et danse sur le kick. Les presets se règlent dans le <a href="lab.html" style="color:var(--acc)">labo d'effets</a>.</p>
+        <div class="row"><button id="bSmoke">💨 Afficher la boule de fumée</button></div>
+        <div class="row"><span class="lbl">Preset</span><select id="selSmoke"></select><button id="bSmokePaste">Coller du labo</button><button id="bSmokeDel" hidden>✕</button></div>
+        <div class="grid">
+          <span class="lbl">Taille</span><input id="smokeSize" type="range" min="0.4" max="2.5" step="0.05" value="1"><span class="val" id="smokeSizeV"></span>
+          <span class="lbl">Qualité</span><input id="smokeQ" type="range" min="0.3" max="1" step="0.05" value="0.6"><span class="val" id="smokeQV"></span>
+        </div>
+        <p class="help">Baisse la qualité si l'image saccade.</p>
+      </div>
+      <div class="card">
         <h3>Banque de vidéos</h3>
         <p class="help">Les vidéos tournent en boucle, comme une caméra.</p>
         <div class="row">
@@ -948,6 +959,235 @@ const FLOCK = (() => {
   };
 })();
 
+/* ================= Boule de fumée (source virtuelle, mise au point dans lab.html) ================= */
+const SMOKE_DEF = {"inflate":0.35,"attack":15,"release":260,"springFreq":4,"springDamp":0.45,"squash":0.12,"kickTurb":0.5,"kickFlow":2.5,"flash":0.4,
+  "danceMode":0,"danceAmp":0.06,"danceMax":0.2,"danceReturn":600,"danceFreq":3,"danceDamp":0.35,"rotKick":12,
+  "radius":0.18,"soft":0.35,"turb":0.45,"warp":0.3,"swirl":0.8,"scale":1.8,"oct":4,"noiseAmt":0.75,"core":0.6,"density":1,"contrast":1.1,
+  "wisps":0.8,"wispReach":0.5,"flow":0.25,"relief":0.25,"cIn":"#ffffff","cOut":"#7f8a99","cGlow":"#6a7cff","bg":"#000000","bright":1,"glow":0.25,
+  "glowSize":0.8,"hueSpeed":0,"hueKick":0,"breathAmt":0.04,"breathSpeed":0.25,"driftAmt":0.03,"driftSpeed":0.1,"grain":0.04,"vignette":0.4};
+const SMOKE_BUILTIN = [
+  {"effet":"boule-de-fumee","v":1,"nom":"Preset 1","reglages":{"sens":1.95,"freq":140,"gap":140,"inflate":0.23,"attack":52,"release":740,"springFreq":10.2,"springDamp":1.04,"squash":-0.05,"kickTurb":2,"kickFlow":5.6,"flash":1.22,"danceMode":0,"danceAmp":0,"danceMax":0.43,"danceReturn":980,"danceFreq":4.9,"danceDamp":0.35,"rotKick":12,"radius":0.13,"soft":0.49,"turb":0.78,"warp":0.57,"swirl":0,"scale":1.65,"oct":5,"noiseAmt":1,"core":0.51,"density":1.48,"contrast":0.58,"wisps":1.62,"wispReach":0.72,"flow":0.19,"relief":0.96,"cIn":"#858585","cOut":"#7f8a99","cGlow":"#ffdbd8","bg":"#000000","bright":1,"glow":0.25,"glowSize":0.8,"hueSpeed":12,"hueKick":180,"breathAmt":0.04,"breathSpeed":0.05,"driftAmt":0,"driftSpeed":0.01,"grain":0,"vignette":0.58}},
+];
+const SMOKE = (() => {
+  const BW = 1280, BH = 720;
+  const cv = document.createElement('canvas'); cv.width = BW; cv.height = BH;
+  const g = cv.getContext('webgl', { antialias:false, alpha:false, preserveDrawingBuffer:true });
+  let prog = null, U = {};
+  let P = Object.assign({}, SMOKE_DEF);
+  const St = { env:0, atk:false, inf:0, infV:0, tx:0, ty:0, ox:0, oy:0, ovx:0, ovy:0, rot:0, rotV:0, dir:1,
+               ang:Math.random()*6.28, smokeT:Math.random()*50, hue:0, t:0 };
+  const FS = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform vec2 uRes, uOff, uStretch;
+uniform float uT, uR, uRot, uSoft, uScale, uOct, uTurb, uWarp, uSwirl, uDensity, uContrast, uNoiseAmt, uCore,
+  uWisps, uWispReach, uGlow, uGlowSize, uRelief, uBright, uFlash, uHue, uGrain, uGrainT, uVignette;
+uniform vec3 uCIn, uCOut, uCGlow, uBg;
+
+vec3 mod289(vec3 x){ return x - floor(x*(1./289.))*289.; }
+vec4 mod289(vec4 x){ return x - floor(x*(1./289.))*289.; }
+vec4 permute(vec4 x){ return mod289(((x*34.)+1.)*x); }
+vec4 taylorInvSqrt(vec4 r){ return 1.79284291400159 - 0.85373472095314*r; }
+float snoise(vec3 v){
+  const vec2 C = vec2(1./6., 1./3.);
+  const vec4 D = vec4(0., .5, 1., 2.);
+  vec3 i = floor(v + dot(v, C.yyy));
+  vec3 x0 = v - i + dot(i, C.xxx);
+  vec3 g = step(x0.yzx, x0.xyz);
+  vec3 l = 1. - g;
+  vec3 i1 = min(g.xyz, l.zxy);
+  vec3 i2 = max(g.xyz, l.zxy);
+  vec3 x1 = x0 - i1 + C.xxx;
+  vec3 x2 = x0 - i2 + C.yyy;
+  vec3 x3 = x0 - D.yyy;
+  i = mod289(i);
+  vec4 p = permute(permute(permute(i.z + vec4(0., i1.z, i2.z, 1.)) + i.y + vec4(0., i1.y, i2.y, 1.)) + i.x + vec4(0., i1.x, i2.x, 1.));
+  float n_ = 0.142857142857;
+  vec3 ns = n_*D.wyz - D.xzx;
+  vec4 j = p - 49.*floor(p*ns.z*ns.z);
+  vec4 x_ = floor(j*ns.z);
+  vec4 y_ = floor(j - 7.*x_);
+  vec4 x = x_*ns.x + ns.yyyy;
+  vec4 y = y_*ns.x + ns.yyyy;
+  vec4 h = 1. - abs(x) - abs(y);
+  vec4 b0 = vec4(x.xy, y.xy);
+  vec4 b1 = vec4(x.zw, y.zw);
+  vec4 s0 = floor(b0)*2. + 1.;
+  vec4 s1 = floor(b1)*2. + 1.;
+  vec4 sh = -step(h, vec4(0.));
+  vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+  vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+  vec3 p0 = vec3(a0.xy, h.x);
+  vec3 p1 = vec3(a0.zw, h.y);
+  vec3 p2 = vec3(a1.xy, h.z);
+  vec3 p3 = vec3(a1.zw, h.w);
+  vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+  vec4 m = max(.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.);
+  m = m*m;
+  return 42.*dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+}
+float fbm(vec3 p, float oct){
+  float s = 0., a = .5, t = 0.;
+  for (int i = 0; i < 7; i++){
+    if (float(i) >= oct) break;
+    s += a*snoise(p); t += a;
+    p = p*2.03 + vec3(1.7, -3.1, 2.3); a *= .5;
+  }
+  return s/t;
+}
+mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+vec3 hueRot(vec3 c, float a){ const vec3 k = vec3(.57735); float ca = cos(a); return c*ca + cross(k, c)*sin(a) + k*dot(k, c)*(1. - ca); }
+float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)))*43758.5453); }
+
+void main(){
+  float mn = min(uRes.x, uRes.y);
+  vec2 uv = (gl_FragCoord.xy - .5*uRes)/mn;
+  vec2 p = rot(uRot)*(uv - uOff);
+  p /= uStretch;
+  float r0 = length(p)/uR;
+  p = rot(uSwirl*exp(-r0*r0*1.2))*p;          // tourbillon
+  vec2 q = p/uR*(uScale*.5);                    // coordonnées liées à la boule
+
+  // Distorsion globale (domain warping)
+  vec2 w = vec2(fbm(vec3(q*.7, uT*.8) + vec3(0., 0., 1.7), 2.),
+                fbm(vec3(q*.7, uT*.8) + vec3(5.2, 1.3, -2.1), 2.));
+  vec2 pw = p + uWarp*uR*w;
+  float d = length(pw)/uR;
+
+  // Texture interne et bord
+  vec3 nq = vec3(q + 1.5*w, uT*1.3);
+  float n = fbm(nq, uOct)*.5 + .5;
+  float eN = fbm(vec3(q*1.7 + 7.3, uT*1.1), 3.);
+  float dd = d + uTurb*eN*.5;
+  float body = 1. - smoothstep(1. - uSoft, 1.0001, dd);
+  float thick = sqrt(clamp(1. - dd*dd, 0., 1.));
+  float dens = body*mix(1., thick, uCore)*mix(1., n*1.6, uNoiseAmt);
+
+  // Filaments qui s'échappent
+  float outside = max(dd - 1. + uSoft*.5, 0.);
+  float wisp = uWisps*smoothstep(.45, .85, n)*exp(-outside*(4./max(uWispReach, .01)))*(1. - body*.7);
+  dens += wisp;
+  dens = pow(max(dens*uDensity, 0.), uContrast);
+
+  // Relief (ombrage façon lumière en haut à gauche)
+  float light = 1.;
+  if (uRelief > .001){
+    float n2 = fbm(nq + vec3(-.06, .06, 0.), uOct)*.5 + .5;
+    light = clamp(1. + (n - n2)*6.*uRelief, .15, 2.);
+  }
+
+  vec3 smoke = mix(uCOut, uCIn, clamp(thick*n*1.5, 0., 1.))*light*uBright*(1. + uFlash);
+  float g = uGlow*exp(-pow(max(d - .3, 0.)/(.5 + uGlowSize), 2.)*2.);
+  vec3 glow = uCGlow*g*(1. + uFlash*.5);
+  smoke = hueRot(smoke, uHue); glow = hueRot(glow, uHue);
+
+  vec3 col = mix(uBg, smoke, clamp(dens, 0., 1.)) + glow*(1. - clamp(dens, 0., 1.)*.5);
+  col = 1. - exp(-col*1.6);                     // compression douce des hautes lumières
+  col *= 1. - uVignette*.35*dot(uv, uv);
+  col += (hash(gl_FragCoord.xy + uGrainT) - .5)*uGrain;
+  gl_FragColor = vec4(max(col, 0.), 1.);
+}`;
+  function init(){
+    if (prog || !g) return;
+    const sh = (type, src) => { const s = g.createShader(type); g.shaderSource(s, src); g.compileShader(s);
+      if (!g.getShaderParameter(s, g.COMPILE_STATUS)) throw new Error(g.getShaderInfoLog(s)); return s; };
+    prog = g.createProgram();
+    g.attachShader(prog, sh(g.VERTEX_SHADER, 'attribute vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }'));
+    g.attachShader(prog, sh(g.FRAGMENT_SHADER, FS));
+    g.bindAttribLocation(prog, 0, 'a'); g.linkProgram(prog); g.useProgram(prog);
+    const b = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, b);
+    g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), g.STATIC_DRAW);
+    g.enableVertexAttribArray(0); g.vertexAttribPointer(0, 2, g.FLOAT, false, 0, 0);
+    const n = g.getProgramParameter(prog, g.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++){ const u = g.getActiveUniform(prog, i); U[u.name] = g.getUniformLocation(prog, u.name); }
+  }
+  function spring(x, v, target, freq, damp, dt){
+    const w = 2*Math.PI*freq, a = w*w*(target - x) - 2*damp*w*v;
+    v += a*dt; return [x + v*dt, v];
+  }
+  const hex = h => [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16)/255);
+  function step(dt){
+    if (St.atk){ St.env += dt*1000/Math.max(1, P.attack); if (St.env >= 1){ St.env = 1; St.atk = false; } }
+    else St.env *= Math.exp(-dt*1000*3/P.release);
+    const k = Math.exp(-dt*1000*3/P.danceReturn); St.tx *= k; St.ty *= k;
+    const n = Math.max(1, Math.ceil(dt*240)), h = dt/n;
+    for (let i = 0; i < n; i++){
+      [St.inf, St.infV] = spring(St.inf, St.infV, St.env, P.springFreq, P.springDamp, h);
+      [St.ox, St.ovx] = spring(St.ox, St.ovx, St.tx, P.danceFreq, P.danceDamp, h);
+      [St.oy, St.ovy] = spring(St.oy, St.ovy, St.ty, P.danceFreq, P.danceDamp, h);
+      [St.rot, St.rotV] = spring(St.rot, St.rotV, 0, P.springFreq, P.springDamp, h);
+    }
+    St.t += dt;
+    St.smokeT += dt*(P.flow + P.kickFlow*St.env*0.3);
+    St.hue += P.hueSpeed*dt;
+  }
+  function draw(){
+    const q = +$('smokeQ').value, w = Math.round(BW*q), h = Math.round(BH*q);
+    if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; }
+    g.viewport(0, 0, w, h);
+    const f = (n, v) => U[n] && g.uniform1f(U[n], v);
+    const breath = P.breathAmt*Math.sin(St.t*2*Math.PI*P.breathSpeed);
+    const R = Math.max(0.01, P.radius*(+$('smokeSize').value)*(1 + P.inflate*St.inf + breath));
+    const ds = 2*Math.PI*P.driftSpeed;
+    const dx = P.driftAmt*(Math.sin(St.t*ds) + .5*Math.sin(St.t*ds*2.3 + 1.))/1.5;
+    const dy = P.driftAmt*(Math.cos(St.t*ds*.8 + .4) + .5*Math.sin(St.t*ds*1.7 + 2.))/1.5;
+    const sq = P.squash*St.inf;
+    g.uniform2f(U.uRes, w, h);
+    g.uniform2f(U.uOff, St.ox + dx, St.oy + dy);
+    g.uniform2f(U.uStretch, Math.max(.2, 1 + sq), Math.max(.2, 1 - sq));
+    f('uT', St.smokeT); f('uR', R); f('uRot', St.rot);
+    f('uSoft', P.soft); f('uScale', P.scale); f('uOct', P.oct);
+    f('uTurb', P.turb + P.kickTurb*St.env); f('uWarp', P.warp); f('uSwirl', P.swirl);
+    f('uDensity', P.density); f('uContrast', P.contrast); f('uNoiseAmt', P.noiseAmt); f('uCore', P.core);
+    f('uWisps', P.wisps); f('uWispReach', P.wispReach); f('uGlow', P.glow); f('uGlowSize', P.glowSize);
+    f('uRelief', P.relief); f('uBright', P.bright); f('uFlash', P.flash*St.env);
+    f('uHue', St.hue*Math.PI/180); f('uGrain', P.grain); f('uGrainT', St.t*60 % 100); f('uVignette', P.vignette);
+    g.uniform3fv(U.uCIn, hex(P.cIn)); g.uniform3fv(U.uCOut, hex(P.cOut));
+    g.uniform3fv(U.uCGlow, hex(P.cGlow)); g.uniform3fv(U.uBg, hex(P.bg));
+    g.drawArrays(g.TRIANGLES, 0, 3);
+  }
+  return {
+    canvas: cv,
+    ok: !!g,
+    update(dt){ try { init(); } catch(e){ console.warn('Boule de fumée', e); return; } step(Math.min(0.1, dt/1000)); draw(); },
+    kick(){
+      St.atk = true; if (P.attack <= 0){ St.env = 1; St.atk = false; }
+      const a = P.danceAmp; let dx = 0, dy = 0;
+      switch (P.danceMode){
+        case 0: { const t = Math.random()*Math.PI*2; dx = Math.cos(t)*a; dy = Math.sin(t)*a; break; }
+        case 1: St.dir = -St.dir; dx = St.dir*a; dy = (Math.random() - .5)*a*.3; break;
+        case 2: dy = a; dx = (Math.random() - .5)*a*.4; break;
+        case 3: St.ang += Math.PI/2; dx = Math.cos(St.ang)*a; dy = Math.sin(St.ang)*a; break;
+        case 4: { const r = Math.hypot(St.tx, St.ty); if (r > 1e-4){ dx = -St.tx/r*a; dy = -St.ty/r*a; } else { const t = Math.random()*6.28; dx = Math.cos(t)*a; dy = Math.sin(t)*a; } break; }
+      }
+      St.tx += dx; St.ty += dy;
+      const r = Math.hypot(St.tx, St.ty); if (r > P.danceMax && r > 0){ St.tx *= P.danceMax/r; St.ty *= P.danceMax/r; }
+      St.rotV += (Math.random() < .5 ? -1 : 1)*P.rotKick*Math.PI/180*2*Math.PI*P.springFreq;
+      St.hue += P.hueKick;
+    },
+    setPreset(reg){ P = Object.assign({}, SMOKE_DEF); for (const k in reg) if (k in SMOKE_DEF) P[k] = reg[k]; },
+  };
+})();
+let smokeUser = loadJSON('dcs-smoke-presets', []);
+const smokeAll = () => SMOKE_BUILTIN.concat(smokeUser);
+function setSmokePreset(i){
+  const all = smokeAll(); if (!all.length) return;
+  i = Math.max(0, Math.min(all.length - 1, i|0));
+  S.smokePreset = i; SMOKE.setPreset(all[i].reglages);
+  try { localStorage.setItem('dcs-smoke-cur', String(i)); } catch(e){}
+  const sel = $('selSmoke'); if (sel) sel.value = String(i);
+}
+function refreshSmokeList(){
+  const sel = $('selSmoke'); sel.innerHTML = '';
+  smokeAll().forEach((p, i) => sel.add(new Option(p.nom + (i >= SMOKE_BUILTIN.length ? ' (collé)' : ''), String(i))));
+  sel.value = String(S.smokePreset || 0);
+  $('bSmokeDel').hidden = (S.smokePreset || 0) < SMOKE_BUILTIN.length;
+}
+
 const TRANS = ['Coupure', 'Fondu', 'Glitch', 'Zoom', 'Volet', 'Flash'];
 function whenReady(el){
   if (!(el instanceof HTMLVideoElement) || el.readyState >= 2) return Promise.resolve();
@@ -959,7 +1199,7 @@ function whenReady(el){
 }
 async function sourceEl(src){
   if (src.type === 'cam') return getCamVideo(src.deviceId);
-  if (src.type === 'flock') return src.el;
+  if (src.type === 'flock' || src.type === 'smoke') return src.el;
   await src.el.play().catch(()=>{});
   return src.el;
 }
@@ -1004,7 +1244,7 @@ function nextManualSource(){
 
 /* Sources cochées + types d'effets autorisés par source (mémorisés dans le navigateur) */
 const FX_TYPES = [['kick', 'Kick'], ['bg', 'Fond'], ['edge', 'Bords'], ['anim', 'Animaux']];
-function srcKey(s){ return s.type === 'cam' ? 'cam:' + s.deviceId : s.type === 'flock' ? 'flock' : 'video:' + s.label; }
+function srcKey(s){ return s.type === 'cam' ? 'cam:' + s.deviceId : (s.type === 'flock' || s.type === 'smoke') ? s.type : 'video:' + s.label; }
 function loadJSON(k, d){ try { return JSON.parse(localStorage.getItem(k)) || d; } catch(e){ return d; } }
 function saveJSON(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
 const srcOff = new Set(loadJSON('dcs-src-off', []));
@@ -1150,6 +1390,7 @@ function kick(now){
   }
   if ((S.cats || S.alpacas) && allowed('anim')) spawnCats();
   if (S.video === FLOCK.canvas) FLOCK.kick();
+  if (S.video === SMOKE.canvas) SMOKE.kick();
   const d = $('dot'); d.classList.add('hit'); setTimeout(() => d.classList.remove('hit'), 70);
 }
 function bpm(){
@@ -1483,6 +1724,7 @@ function frame(now){
   const trP = S.trDur > 0 ? Math.min(1, (now - S.trStart)/S.trDur) : 1;
   const inTr = trP < 1 && S.tr > 0;
   if (S.video === FLOCK.canvas || (inTr && S.prevEl === FLOCK.canvas)) FLOCK.update(dt, now);
+  if (S.video === SMOKE.canvas || (inTr && S.prevEl === SMOKE.canvas)) SMOKE.update(dt);
   const upload = (unit, tex, el) => {
     gl.activeTexture(unit); gl.bindTexture(gl.TEXTURE_2D, tex);
     const isCanvas = el instanceof HTMLCanvasElement;
@@ -1635,7 +1877,7 @@ function frame(now){
 }
 
 /* ================= Favoris ================= */
-const P_SLIDERS = ['amt', 'dur', 'bgAmt', 'bgSpeed', 'echoLen', 'echoThr', 'edgeAmt', 'edgeSize', 'edgeSpeed'];
+const P_SLIDERS = ['amt', 'dur', 'bgAmt', 'bgSpeed', 'echoLen', 'echoThr', 'edgeAmt', 'edgeSize', 'edgeSpeed', 'smokeSize'];
 const P_TOGGLES = { echoRainbow: 'bEchoRainbow', edgePulse: 'bEdgePulse', cats: 'bCats', alpacas: 'bAlp' };
 let presets = loadJSON('dcs-presets', []);
 const savePresets = () => saveJSON('dcs-presets', presets);
@@ -1643,7 +1885,8 @@ const savePresets = () => saveJSON('dcs-presets', presets);
 function snapshot(){
   const cur = S.sources[S.srcIdx];
   const p = { src: S.favSrc && cur ? { key: srcKey(cur), label: cur.label } : null,
-    kick: [...S.kfx].sort(), bg: [...S.bg].sort((a, b) => a - b), edge: S.edge, set: {}, tog: {} };
+    kick: [...S.kfx].sort(), bg: [...S.bg].sort((a, b) => a - b), edge: S.edge, set: {}, tog: {},
+    smoke: smokeAll()[S.smokePreset || 0]?.nom };
   P_SLIDERS.forEach(id => p.set[id] = +$(id).value);
   for (const k in P_TOGGLES) p.tog[k] = !!S[k];
   return p;
@@ -1661,6 +1904,7 @@ function addPreset(name){
 }
 function applyPreset(p){
   if (p.src){ const i = S.sources.findIndex(s => srcKey(s) === p.src.key); if (i >= 0) switchSource(i); }
+  if (p.smoke){ const j = smokeAll().findIndex(x => x.nom === p.smoke); if (j >= 0){ setSmokePreset(j); refreshSmokeList(); } }
   S.kfx = new Set(p.kick.filter(i => i < KICK.length)); refreshKick();
   setBg(new Set(p.bg.filter(i => BG[i])));
   setEdge(p.edge < EDGE.length ? p.edge : -1);
@@ -1822,6 +2066,29 @@ function setupUi(){
   $('bFavNone').onclick = () => { presets.forEach(p => p.rot = false); savePresets(); renderPresets(); };
   renderPresets();
   $('bFlock').onclick = () => switchSource(S.sources.findIndex(x => x.type === 'flock'));
+  $('bSmoke').onclick = () => switchSource(S.sources.findIndex(x => x.type === 'smoke'));
+  bindSlider('smokeSize', v => '×' + (+v).toFixed(2));
+  bindSlider('smokeQ', v => Math.round(v*100) + ' %');
+  setSmokePreset(+(localStorage.getItem('dcs-smoke-cur') || 0)); refreshSmokeList();
+  $('selSmoke').onchange = e => { setSmokePreset(+e.target.value); refreshSmokeList(); };
+  $('bSmokePaste').onclick = () => {
+    const txt = prompt('Colle ici les réglages copiés dans le labo :', '');
+    if (!txt) return;
+    try {
+      const i = txt.indexOf('{'), j = txt.lastIndexOf('}');
+      const o = JSON.parse(txt.slice(i, j + 1));
+      if (!o.reglages || (o.effet && o.effet !== 'boule-de-fumee')) throw new Error('ce ne sont pas des réglages de boule de fumée');
+      o.nom = o.nom || 'Preset collé';
+      smokeUser = smokeUser.filter(p => p.nom !== o.nom); smokeUser.push(o); saveJSON('dcs-smoke-presets', smokeUser);
+      setSmokePreset(smokeAll().findIndex(p => p === o)); refreshSmokeList();
+    } catch(e){ alert('Réglages illisibles : ' + e.message); }
+  };
+  $('bSmokeDel').onclick = () => {
+    const i = S.smokePreset - SMOKE_BUILTIN.length; if (i < 0) return;
+    if (!confirm('Supprimer « ' + smokeUser[i].nom + ' » ?')) return;
+    smokeUser.splice(i, 1); saveJSON('dcs-smoke-presets', smokeUser);
+    setSmokePreset(0); refreshSmokeList();
+  };
   bindSlider('flockN', v => v, v => FLOCK.setCount(v|0));
   bindSlider('waveAmp', v => v);
   bindSlider('birdSize', v => '×' + (+v).toFixed(1));
@@ -1894,6 +2161,7 @@ async function start(){
   } else vids.set(firstId, v);
   S.srcIdx = idx; S.video = v; S.curMir = true;
   addSource({ type: 'flock', label: "🐦 Nuée d'étourneaux", el: FLOCK.canvas });
+  if (SMOKE.ok) addSource({ type: 'smoke', label: '💨 Boule de fumée', el: SMOKE.canvas });
   await loadRepoVideos();
   refreshSources();
 
